@@ -279,10 +279,19 @@ async def test_client(
 
     app = create_app()
 
+    from app.api.v1.dependencies import get_current_user
+
     # Override the real dependency functions with our mocks
     # This is FastAPI's built-in "dependency override" feature
     app.dependency_overrides[get_openai_client] = lambda: mock_openai_client
     app.dependency_overrides[get_pinecone_client] = lambda: mock_pinecone_client
+    # Override auth so tests don't need real JWTs — the router tests focus
+    # on request/response shapes, not auth. Auth is tested separately in test_jwt_validator.py.
+    app.dependency_overrides[get_current_user] = lambda: {
+        "sub": "test-user-123",
+        "email": "test@example.com",
+        "name": "Test User",
+    }
 
     async with AsyncClient(
         transport=ASGITransport(app=app),

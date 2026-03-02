@@ -11,8 +11,11 @@ To add a new endpoint:
 3. Include it with api_router.include_router(...)
 """
 
-from fastapi import APIRouter
+from typing import Any
 
+from fastapi import APIRouter, Depends
+
+from app.api.v1.dependencies import get_current_user
 from app.models.requests import (
     BusinessLogicRequest,
     DependenciesRequest,
@@ -38,22 +41,24 @@ api_router = APIRouter()
 #
 # Replaced by: feature/api-full-pipeline
 @api_router.post("/query", response_model=StubResponse, tags=["query"])
-async def query_stub(request: QueryRequest) -> StubResponse:
+async def query_stub(
+    request: QueryRequest,
+    current_user: dict[str, Any] = Depends(get_current_user),
+) -> StubResponse:
     """
     Stub: Query the COBOL codebase with a natural language question.
 
-    TEMPORARY: Returns a hardcoded stub response. Input validation via
-    QueryRequest is live — the full pipeline (embedding, retrieval, generation)
-    is wired in feature/api-full-pipeline.
+    TEMPORARY: Returns a hardcoded stub response. Auth is live.
+    Full pipeline (embedding, retrieval, generation) wired in feature/api-full-pipeline.
 
     Args:
-        request: Validated query with plain-English question and top_k setting.
+        request:      Validated query with plain-English question and top_k setting.
+        current_user: Decoded JWT payload injected by get_current_user dependency.
 
     Returns:
         StubResponse with status="stub" until the pipeline is implemented.
     """
-    # Log the query so we can see it in Railway logs even during the stub phase
-    _ = request  # will be used when real logic is wired
+    _ = request, current_user  # will be used when real logic is wired
     return StubResponse(
         status="stub",
         message="Query endpoint not yet implemented — this is a scaffold stub",
@@ -62,9 +67,12 @@ async def query_stub(request: QueryRequest) -> StubResponse:
 
 # ── Placeholder: Explain endpoint ─────────────────────────────────────────────
 @api_router.post("/explain", response_model=ExplainResponse, tags=["features"])
-async def explain_stub(request: ExplainRequest) -> ExplainResponse:
+async def explain_stub(
+    request: ExplainRequest,
+    current_user: dict[str, Any] = Depends(get_current_user),
+) -> ExplainResponse:
     """Stub: Code Explanation feature (Feature 1). Replaced in feature/api-code-features."""
-    _ = request
+    _ = current_user
     return ExplainResponse(
         status="stub",
         message="Not yet implemented",
@@ -76,9 +84,12 @@ async def explain_stub(request: ExplainRequest) -> ExplainResponse:
 @api_router.post(
     "/dependencies", response_model=DependenciesResponse, tags=["features"]
 )
-async def dependencies_stub(request: DependenciesRequest) -> DependenciesResponse:
+async def dependencies_stub(
+    request: DependenciesRequest,
+    current_user: dict[str, Any] = Depends(get_current_user),
+) -> DependenciesResponse:
     """Stub: Dependency Mapping feature (Feature 2). Replaced in feature/api-code-features."""
-    _ = request
+    _ = current_user
     return DependenciesResponse(
         status="stub",
         message="Not yet implemented",
@@ -90,9 +101,12 @@ async def dependencies_stub(request: DependenciesRequest) -> DependenciesRespons
 @api_router.post(
     "/business-logic", response_model=BusinessLogicResponse, tags=["features"]
 )
-async def business_logic_stub(request: BusinessLogicRequest) -> BusinessLogicResponse:
+async def business_logic_stub(
+    request: BusinessLogicRequest,
+    current_user: dict[str, Any] = Depends(get_current_user),
+) -> BusinessLogicResponse:
     """Stub: Business Logic Extraction feature (Feature 3). Replaced in feature/api-code-features."""
-    _ = request
+    _ = current_user
     return BusinessLogicResponse(
         status="stub",
         message="Not yet implemented",
@@ -102,9 +116,12 @@ async def business_logic_stub(request: BusinessLogicRequest) -> BusinessLogicRes
 
 # ── Placeholder: Impact Analysis endpoint ─────────────────────────────────────
 @api_router.post("/impact", response_model=ImpactResponse, tags=["features"])
-async def impact_stub(request: ImpactRequest) -> ImpactResponse:
+async def impact_stub(
+    request: ImpactRequest,
+    current_user: dict[str, Any] = Depends(get_current_user),
+) -> ImpactResponse:
     """Stub: Impact Analysis feature (Feature 4). Replaced in feature/api-code-features."""
-    _ = request
+    _ = current_user
     return ImpactResponse(
         status="stub",
         message="Not yet implemented",
