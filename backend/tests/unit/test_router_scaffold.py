@@ -5,16 +5,18 @@ These tests verify that:
 - Each stub endpoint accepts correctly shaped input
 - Each stub endpoint returns correctly shaped output
 - Invalid input is rejected with 422 (validation error), not 500
+- Protected endpoints return 401 when no auth token is provided
 - The /health endpoint responds correctly
 
 We use the `test_client` fixture from conftest.py which already wires up
-the FastAPI app with mocked OpenAI and Pinecone dependencies.
+the FastAPI app with mocked OpenAI, Pinecone, and auth dependencies.
 
 No real API calls are made — all external services are mocked.
 """
 
 import pytest
-from httpx import AsyncClient
+from fastapi import FastAPI
+from httpx import ASGITransport, AsyncClient
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -220,3 +222,63 @@ async def test_impact_stub_missing_fields_rejected(test_client: AsyncClient) -> 
         json={"file_path": "samples/payroll.cob"},  # missing paragraph_name
     )
     assert response.status_code == 422
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Auth enforcement tests
+# These use a raw client WITHOUT the auth override to verify 401 behavior
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+@pytest.mark.asyncio
+async def test_query_without_token_returns_401() -> None:
+    """Protected /query endpoint returns 401 when no Bearer token is provided."""
+    import os
+    os.environ.setdefault("OPENAI_API_KEY", "sk-test-fake")
+    os.environ.setdefault("PINECONE_API_KEY", "pctest-fake")
+    os.environ.setdefault("GITHUB_CLIENT_ID", "test-id")
+    os.environ.setdefault("GITHUB_CLIENT_SECRET", "test-secret")
+    os.environ.setdefault("NEXTAUTH_SECRET", "test-nextauth-secret-32chars-long!!")
+
+    from app.config import get_settings
+    from app.main import create_app
+
+    get_settings.cache_clear()
+    app = create_app()
+
+    async with AsyncClient(
+        transport=ASGITransport(app=app),
+        base_url="http://test",
+    ) as client:
+        response = await client.post(
+            "/api/v1/query",
+            json={"query": "test query"},
+            # No Authorization header
+        )
+
+    assert response.status_code == 401
+
+
+@pytest.mark.asyncio
+async def test_health_endpoint_does_not_require_auth() -> None:
+    """The /health endpoint is public — no auth token needed."""
+    import os
+    os.environ.setdefault("OPENAI_API_KEY", "sk-test-fake")
+    os.environ.setdefault("PINECONE_API_KEY", "pctest-fake")
+    os.environ.setdefault("GITHUB_CLIENT_ID", "test-id")
+    os.environ.setdefault("GITHUB_CLIENT_SECRET", "test-secret")
+    os.environ.setdefault("NEXTAUTH_SECRET", "test-nextauth-secret-32chars-long!!")
+
+    from app.config import get_settings
+    from app.main import create_app
+
+    get_settings.cache_clear()
+    app = create_app()
+
+    async with AsyncClient(
+        transport=ASGITransport(app=app),
+        base_url="http://test",
+    ) as client:
+        response = await client.get("/health")
+
+    assert response.status_code == 200

@@ -22,7 +22,7 @@ const config: Config = {
   testEnvironment: 'jsdom',
 
   // Run our custom setup file after Jest initializes (adds custom matchers)
-  setupFilesAfterFramework: ['<rootDir>/jest.setup.ts'],
+  setupFilesAfterEnv: ['<rootDir>/jest.setup.ts'],
 
   // Map the @ import alias to the src/ directory
   // This lets tests use: import { foo } from '@/lib/api' instead of '../../lib/api'
@@ -31,7 +31,7 @@ const config: Config = {
   },
 
   // Find test files in __tests__ directories or files ending in .test.ts(x)
-  testPathPattern: ['**/__tests__/**/*.[jt]s?(x)', '**/*.test.[jt]s?(x)'],
+  testMatch: ['**/__tests__/**/*.[jt]s?(x)', '**/*.test.[jt]s?(x)'],
 
   // Measure coverage for all source files, except:
   // - .d.ts type declaration files (no logic to test)

@@ -7,6 +7,18 @@
  * for them mid-project.
  */
 
+// Polyfill fetch for the jsdom test environment.
+// NextAuth's SessionProvider makes fetch calls to /api/auth/session.
+// This mock prevents "ReferenceError: fetch is not defined" in tests.
+global.fetch = jest.fn(() =>
+  Promise.resolve({
+    ok: true,
+    json: () => Promise.resolve({}),
+    text: () => Promise.resolve(""),
+    status: 200,
+  } as Response)
+)
+
 // Adds extra matchers to Jest like:
 // expect(element).toBeInTheDocument()
 // expect(element).toHaveTextContent('hello')
@@ -60,12 +72,15 @@ jest.mock('next/navigation', () => ({
 // ─────────────────────────────────────────────────────────────────────────────
 // Next.js's Image component does complex optimization that doesn't work in jsdom.
 // Replace it with a plain <img> tag for tests.
+// eslint-disable-next-line @typescript-eslint/no-require-imports
+const React = require('react')
 jest.mock('next/image', () => ({
   __esModule: true,
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   default: (props: any) => {
-    // eslint-disable-next-line @next/next/no-img-element, jsx-a11y/alt-text
-    return <img {...props} />
+    // Use React.createElement instead of JSX since this is a .ts file
+    // eslint-disable-next-line @next/next/no-img-element
+    return React.createElement('img', props)
   },
 }))
 
