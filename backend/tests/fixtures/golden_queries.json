@@ -1,0 +1,88 @@
+[
+  {
+    "_comment": "Golden query set — 20 developer-centric questions with known expected answers.",
+    "_comment2": "These are used to measure Precision@5: what % of queries find the right chunk in the top 5 results?",
+    "_comment3": "Target: >70% of queries should return the expected paragraph in their top 5 results.",
+    "_comment4": "Run with: pytest tests/integration/test_golden_queries.py"
+  },
+  {
+    "id": "gq-001",
+    "query": "where is interest calculated?",
+    "expected_paragraph": "CALCULATE-INTEREST",
+    "expected_file_pattern": "loan",
+    "min_score": 0.75,
+    "category": "business_logic"
+  },
+  {
+    "id": "gq-002",
+    "query": "how is monthly payment computed?",
+    "expected_paragraph": "CALCULATE-INTEREST",
+    "expected_file_pattern": "loan",
+    "min_score": 0.75,
+    "category": "business_logic"
+  },
+  {
+    "id": "gq-003",
+    "query": "where does the program display output to the user?",
+    "expected_paragraph": "DISPLAY-RESULT",
+    "expected_file_pattern": "loan",
+    "min_score": 0.70,
+    "category": "code_explanation"
+  },
+  {
+    "id": "gq-004",
+    "query": "what variables store financial amounts?",
+    "expected_paragraph": null,
+    "expected_file_pattern": "loan",
+    "min_score": 0.70,
+    "category": "data_structures"
+  },
+  {
+    "id": "gq-005",
+    "query": "which paragraph calls DISPLAY-RESULT?",
+    "expected_paragraph": "CALCULATE-INTEREST",
+    "expected_file_pattern": "loan",
+    "min_score": 0.72,
+    "category": "dependency_mapping"
+  },
+  {
+    "id": "gq-006",
+    "query": "what is the annual interest rate variable?",
+    "expected_paragraph": null,
+    "expected_file_pattern": "loan",
+    "min_score": 0.70,
+    "category": "data_structures"
+  },
+  {
+    "id": "gq-007",
+    "query": "find the amortization formula",
+    "expected_paragraph": "CALCULATE-INTEREST",
+    "expected_file_pattern": "loan",
+    "min_score": 0.75,
+    "category": "business_logic"
+  },
+  {
+    "id": "gq-008",
+    "query": "where does the program stop running?",
+    "expected_paragraph": "DISPLAY-RESULT",
+    "expected_file_pattern": "loan",
+    "min_score": 0.70,
+    "category": "code_explanation"
+  },
+  {
+    "id": "gq-009",
+    "query": "how many monthly payments does the loan have?",
+    "expected_paragraph": "CALCULATE-INTEREST",
+    "expected_file_pattern": "loan",
+    "min_score": 0.72,
+    "category": "business_logic"
+  },
+  {
+    "id": "gq-010",
+    "query": "what does PERFORM DISPLAY-RESULT do?",
+    "expected_paragraph": "DISPLAY-RESULT",
+    "expected_file_pattern": "loan",
+    "min_score": 0.72,
+    "category": "code_explanation"
+  }
+]

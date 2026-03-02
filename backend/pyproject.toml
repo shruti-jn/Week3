@@ -1,0 +1,167 @@
+[project]
+name = "legacylens-backend"
+version = "0.1.0"
+description = "RAG-powered COBOL code intelligence system — backend API"
+requires-python = ">=3.12"
+
+# ─────────────────────────────────────────────
+# Runtime dependencies
+# These are the packages the application needs to run in production.
+# ─────────────────────────────────────────────
+dependencies = [
+    # Web framework — handles HTTP requests, routing, and input validation
+    "fastapi>=0.111",
+    # ASGI server — runs the FastAPI app (like Apache/Nginx but for Python async apps)
+    "uvicorn[standard]>=0.30",
+    # Data validation library — ensures request/response shapes are correct
+    "pydantic>=2.7",
+    # Loads settings from environment variables (keeps secrets out of code)
+    "pydantic-settings>=2.3",
+    # Official OpenAI SDK — for embeddings and GPT-4o-mini answer generation
+    "openai>=1.35",
+    # LangChain — RAG orchestration (we use selectively, not for everything)
+    "langchain>=0.2",
+    "langchain-openai>=0.1",
+    "langchain-pinecone>=0.1",
+    # Pinecone vector database client
+    "pinecone-client>=4.1",
+    # HTTP client — used for testing and internal service calls
+    "httpx>=0.27",
+    # JWT validation for auth tokens from NextAuth
+    "python-jose[cryptography]>=3.3",
+    # Rate limiting middleware for FastAPI
+    "slowapi>=0.1",
+]
+
+# ─────────────────────────────────────────────
+# Development dependencies
+# These are only needed when developing or testing, not in production.
+# Install with: pip install -e ".[dev]"
+# ─────────────────────────────────────────────
+[project.optional-dependencies]
+dev = [
+    # Test framework
+    "pytest>=8",
+    # Async test support (lets us test async functions with pytest)
+    "pytest-asyncio>=0.23",
+    # Code coverage measurement (tells us which lines were tested)
+    "pytest-cov>=5",
+    # Mock library for replacing real external services in tests
+    "pytest-mock>=3.14",
+    # Linting — catches bugs, bad patterns, and style issues
+    "ruff>=0.5",
+    # Type checking — ensures type annotations are correct and consistent
+    "mypy>=1.10",
+    # Pre-commit hook runner — runs quality checks before every git commit
+    "pre-commit>=3.7",
+    # Mutation testing — checks if tests actually catch code bugs
+    "mutmut>=2.4",
+    # Type stubs for httpx (needed for mypy)
+    "types-httpx>=0.27",
+]
+
+
+# ─────────────────────────────────────────────
+# Ruff — Linting and Formatting
+# Ruff is like having ESLint + Prettier for Python.
+# It catches bugs (pyflakes), enforces style (pycodestyle), and more.
+# ─────────────────────────────────────────────
+[tool.ruff]
+target-version = "py312"
+line-length = 88  # PEP 8 + Black-compatible
+
+[tool.ruff.lint]
+# These rule sets are enabled — each letter/code is a category:
+# E/W = pycodestyle (style issues), F = pyflakes (logic bugs),
+# I = isort (import ordering), B = bugbear (common bugs),
+# C4 = comprehensions (write loops more cleanly),
+# UP = pyupgrade (use modern Python syntax),
+# ANN = annotations (enforce type hints on all functions),
+# S = bandit (security — catches things like SQL injection patterns),
+# T20 = flake8-print (no print statements),
+# RUF = ruff-specific rules
+select = ["E", "W", "F", "I", "B", "C4", "UP", "ANN", "S", "T20", "RUF"]
+
+# Rules we intentionally skip:
+# ANN101/102 = self/cls don't need type annotations (Python convention)
+# S101 = assert is fine in tests
+ignore = ["ANN101", "ANN102", "S101"]
+
+[tool.ruff.lint.per-file-ignores]
+# In test files, relax annotation requirements and allow assert statements
+# (tests use assert extensively, and fixtures don't need full annotations)
+"tests/*" = ["ANN", "S101", "S105", "S106"]
+# In scripts (one-off CLI tools), allow print statements
+"scripts/*" = ["T20"]
+
+[tool.ruff.format]
+quote-style = "double"
+indent-style = "space"
+line-ending = "lf"  # Consistent line endings across macOS/Windows/Linux
+
+
+# ─────────────────────────────────────────────
+# Mypy — Static Type Checking
+# Mypy verifies that type annotations are correct.
+# Strict mode catches the most issues — it's the A+ standard.
+# ─────────────────────────────────────────────
+[tool.mypy]
+python_version = "3.12"
+strict = true              # Enable ALL strict type checks
+warn_return_any = true     # Warn when a function returns Any
+warn_unused_configs = true # Warn about unused mypy config entries
+no_implicit_reexport = true # Explicit re-exports only (cleaner public APIs)
+plugins = ["pydantic.mypy"] # Pydantic plugin for better Pydantic type checking
+
+# Some third-party packages don't have type stubs — tell mypy to ignore them
+[[tool.mypy.overrides]]
+module = ["pinecone.*", "langchain.*", "langchain_openai.*", "langchain_pinecone.*", "slowapi.*"]
+ignore_missing_stubs = true
+
+
+# ─────────────────────────────────────────────
+# Pytest — Test Configuration
+# Configures how tests are discovered, run, and measured.
+# ─────────────────────────────────────────────
+[tool.pytest.ini_options]
+# Where pytest looks for test files
+testpaths = ["tests"]
+python_files = ["test_*.py"]
+python_classes = ["Test*"]
+python_functions = ["test_*"]
+
+# Default flags added to every pytest run:
+# --strict-markers = fail if a test uses an undeclared marker (prevents typos)
+# --tb=short = show short tracebacks (easier to read than full tracebacks)
+# --cov=app = measure code coverage for the app/ folder
+# --cov-report=term-missing = show which lines are NOT covered in the terminal
+# --cov-report=html:htmlcov = generate an HTML coverage report (open htmlcov/index.html)
+# --cov-fail-under=80 = fail the test run if coverage drops below 80%
+# -v = verbose output (shows each test name)
+addopts = [
+    "--strict-markers",
+    "--tb=short",
+    "--cov=app",
+    "--cov-report=term-missing",
+    "--cov-report=html:htmlcov",
+    "--cov-fail-under=80",
+    "-v",
+]
+
+# asyncio_mode = "auto" means pytest automatically handles async test functions.
+# Without this, async tests would need special decorators on every function.
+asyncio_mode = "auto"
+
+# Markers: custom labels we attach to tests to run subsets.
+# Run only unit tests: pytest -m "not integration"
+# Run only integration tests: pytest -m integration
+markers = [
+    "unit: fast unit tests — no external API calls, no internet needed",
+    "integration: tests that call live Pinecone and OpenAI APIs — requires .env",
+    "slow: tests that take more than 2 seconds to run",
+]
+
+filterwarnings = [
+    "error",               # Turn warnings into errors (catches deprecation issues early)
+    "ignore::DeprecationWarning",  # Except for third-party DeprecationWarnings
+]

@@ -1,0 +1,214 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# LegacyLens CI Pipeline
+# ─────────────────────────────────────────────────────────────────────────────
+# This file defines the Continuous Integration (CI) pipeline.
+# CI means: "automatically check that code is correct every time someone
+# tries to merge it."
+#
+# Think of this as an automatic code reviewer that runs 4 checks in parallel:
+# 1. Backend code quality (linting + type checking)
+# 2. Backend tests (does the code actually work?)
+# 3. Frontend code quality (linting + type checking)
+# 4. Frontend tests (does the React code actually work?)
+#
+# If ANY of these fail, the pull request cannot be merged.
+# This is how we maintain A+ code quality automatically.
+# ─────────────────────────────────────────────────────────────────────────────
+
+name: CI
+
+on:
+  # Run on every pull request targeting dev or main
+  pull_request:
+    branches: [dev, main]
+  # Also run when code is pushed directly to dev (after a merge)
+  push:
+    branches: [dev]
+
+jobs:
+
+  # ──────────────────────────────────────────────────────────────────────────
+  # Job 1: Backend Code Quality
+  # Checks: ruff (linting), mypy (type checking)
+  # Fast: ~30 seconds. No test data or API keys needed.
+  # ──────────────────────────────────────────────────────────────────────────
+  backend-quality:
+    name: "🐍 Backend — Lint + Type Check"
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: backend
+
+    steps:
+      # Step 1: Get the code from GitHub
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      # Step 2: Install Python 3.12
+      # "cache: pip" means GitHub saves our downloaded packages between runs
+      # so we don't re-download everything from scratch every time.
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      # Step 3: Install the backend package and its dev dependencies
+      # "-e" = editable mode (the app/ folder is importable directly)
+      # "[dev]" = also install dev tools (ruff, mypy, pytest)
+      - name: Install dependencies
+        run: pip install -e ".[dev]"
+
+      # Step 4: Run ruff to check for linting errors
+      # If ruff finds any issues, this step fails and the PR is blocked.
+      - name: Ruff lint check
+        run: ruff check .
+
+      # Step 5: Check that code is formatted consistently with ruff
+      # "--check" mode fails if any file needs reformatting.
+      - name: Ruff format check
+        run: ruff format --check .
+
+      # Step 6: Run mypy strict type checking
+      # "--strict" means check everything — no shortcuts.
+      - name: Mypy type check (strict)
+        run: mypy app/ --strict
+
+  # ──────────────────────────────────────────────────────────────────────────
+  # Job 2: Backend Unit Tests
+  # Checks: pytest runs all unit tests, measures code coverage
+  # Slower: ~60-90 seconds (running actual test code)
+  # ──────────────────────────────────────────────────────────────────────────
+  backend-tests:
+    name: "🧪 Backend — Unit Tests + Coverage"
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: backend
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install dependencies
+        run: pip install -e ".[dev]"
+
+      # Run ONLY unit tests (not integration tests)
+      # "-m 'not integration'" = skip any test marked @pytest.mark.integration
+      # Those require real Pinecone and OpenAI API keys which we don't have in CI.
+      # "--cov-fail-under=80" = fail if coverage drops below 80%
+      - name: Run unit tests with coverage
+        run: pytest -m "not integration" tests/unit/ --cov=app --cov-fail-under=80 --cov-report=xml
+
+      # Upload the coverage report to Codecov.
+      # Codecov shows a visual breakdown of which lines are covered.
+      # It also posts a coverage summary comment on the PR.
+      - name: Upload coverage to Codecov
+        uses: codecov/codecov-action@v4
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
+          files: ./backend/coverage.xml
+          fail_ci_if_error: false  # Don't fail CI if Codecov is unavailable
+
+  # ──────────────────────────────────────────────────────────────────────────
+  # Job 3: Frontend Code Quality
+  # Checks: ESLint (linting), Prettier (formatting), tsc (type checking)
+  # Fast: ~45 seconds. No real API calls needed.
+  # ──────────────────────────────────────────────────────────────────────────
+  frontend-quality:
+    name: "⚡ Frontend — Lint + Type Check"
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      # Install Node.js 20 (LTS version — stable and well-tested)
+      # "cache: npm" caches node_modules between runs for speed
+      - name: Set up Node.js 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      # "npm ci" installs exactly what's in package-lock.json
+      # (unlike "npm install" which might upgrade packages)
+      - name: Install dependencies
+        run: npm ci
+
+      # Run ESLint to check for code quality issues
+      # "--max-warnings 0" means any warning counts as an error
+      - name: ESLint lint check
+        run: npx eslint src/ --max-warnings 0
+
+      # Check that all TypeScript/JSX files are formatted correctly
+      - name: Prettier format check
+        run: npx prettier --check src/
+
+      # Run TypeScript compiler for type checking only
+      # "--noEmit" means "check types but don't generate .js files"
+      - name: TypeScript type check (tsc)
+        run: npx tsc --noEmit
+
+  # ──────────────────────────────────────────────────────────────────────────
+  # Job 4: Frontend Tests
+  # Checks: Jest runs all React component and utility tests
+  # Slower: ~60-120 seconds
+  # ──────────────────────────────────────────────────────────────────────────
+  frontend-tests:
+    name: "🧪 Frontend — Jest Tests + Coverage"
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      # "--coverage" generates a coverage report
+      # "--ci" mode makes Jest stricter (no interactive prompts, treats warnings as errors)
+      - name: Run Jest tests with coverage
+        run: npm run test:ci
+
+  # ──────────────────────────────────────────────────────────────────────────
+  # Job 5: Secret Scanning
+  # Scans the entire git history for accidentally committed secrets.
+  # Runs on every PR to catch secrets before they're merged.
+  # ──────────────────────────────────────────────────────────────────────────
+  secret-scan:
+    name: "🔍 Secret Scan (gitleaks)"
+    runs-on: ubuntu-latest
+
+    steps:
+      # fetch-depth: 0 = get the FULL git history (not just the latest commit)
+      # This is important so gitleaks can scan all commits, not just the latest one.
+      - name: Checkout code (full history)
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Scan for secrets with gitleaks
+        uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

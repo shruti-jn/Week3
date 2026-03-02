@@ -1,0 +1,131 @@
+# Pre-commit Hook Configuration
+# ─────────────────────────────────────────────────────────────────────────
+# Pre-commit hooks are checks that run automatically every time you run
+# `git commit`. If any hook fails, the commit is blocked until you fix
+# the issue. Think of it as a quality control gate before code enters
+# the repository.
+#
+# Install: pre-commit install (run once from repo root)
+# Manual run on all files: pre-commit run --all-files
+# Skip hooks for one commit (use sparingly): git commit --no-verify
+# ─────────────────────────────────────────────────────────────────────────
+
+repos:
+
+  # ── Basic hygiene checks ──────────────────────────────────────────────
+  # These are simple, fast checks for common file quality issues.
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v4.6.0
+    hooks:
+      # Removes invisible trailing spaces at the end of lines
+      - id: trailing-whitespace
+
+      # Makes sure every file ends with a single newline character
+      # (Unix convention — prevents "No newline at end of file" warnings)
+      - id: end-of-file-fixer
+
+      # Validates that all .yaml files are valid YAML
+      - id: check-yaml
+
+      # Validates that all .toml files are valid TOML (catches pyproject.toml errors)
+      - id: check-toml
+
+      # Validates that all .json files are valid JSON
+      - id: check-json
+
+      # Blocks commits that have unresolved merge conflict markers (<<<<<<, ======, >>>>>>>)
+      - id: check-merge-conflict
+
+      # Blocks commits that accidentally include private keys or certificates
+      - id: detect-private-key
+
+      # Blocks direct commits to main or dev branches.
+      # All work must go through feature branches — this enforces it.
+      - id: no-commit-to-branch
+        args: ["--branch", "main", "--branch", "dev"]
+
+  # ── Secret Scanning ──────────────────────────────────────────────────
+  # Gitleaks scans the entire diff for patterns that look like secrets:
+  # API keys, tokens, passwords, AWS credentials, etc.
+  # This runs before the code is committed — the last line of defense.
+  - repo: https://github.com/gitleaks/gitleaks
+    rev: v8.18.4
+    hooks:
+      - id: gitleaks
+        name: "🔍 Scan for secrets (gitleaks)"
+
+  # ── Python: Ruff Linting and Formatting ──────────────────────────────
+  # Ruff is a fast Python linter (like ESLint for Python) and formatter.
+  # "ruff" = lint check with auto-fix (fixes simple issues automatically)
+  # "ruff-format" = format check (like Prettier for Python)
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.5.0
+    hooks:
+      - id: ruff
+        name: "🐍 Python lint (ruff)"
+        args: ["--fix"]        # Auto-fix simple issues (import ordering, etc.)
+        files: ^backend/       # Only run on Python files in the backend folder
+
+      - id: ruff-format
+        name: "🐍 Python format (ruff-format)"
+        files: ^backend/
+
+  # ── Python: Mypy Type Checking ────────────────────────────────────────
+  # Mypy checks that all type annotations are correct.
+  # --strict means "check everything" — the highest quality setting.
+  - repo: https://github.com/pre-commit/mirrors-mypy
+    rev: v1.10.0
+    hooks:
+      - id: mypy
+        name: "🐍 Python type check (mypy --strict)"
+        files: ^backend/app/   # Only check the app source code, not tests
+        args: ["--strict", "--ignore-missing-imports"]
+        # mypy needs these packages to understand Pydantic's special type magic
+        additional_dependencies:
+          - pydantic>=2.7
+          - pydantic-settings>=2.3
+          - openai>=1.35
+
+  # ── Python: Unit Tests ────────────────────────────────────────────────
+  # Runs the fast unit tests (no external API calls) before every commit.
+  # If any test fails, the commit is blocked.
+  # These tests run in < 10 seconds thanks to mocked external services.
+  - repo: local
+    hooks:
+      - id: pytest-unit
+        name: "🧪 Python unit tests (pytest)"
+        # Change to backend directory, run tests with the "not integration" filter
+        entry: bash -c 'cd backend && python -m pytest -m "not integration" tests/unit/ -q --tb=short --no-header'
+        language: system
+        pass_filenames: false  # Don't pass changed file names as arguments
+        files: ^backend/       # Only run when Python backend files change
+
+      # ── TypeScript: ESLint Linting ────────────────────────────────────
+      # ESLint catches bugs and enforces code style in TypeScript/React files.
+      # --max-warnings 0 means ANY warning is treated as an error.
+      - id: eslint
+        name: "⚡ TypeScript lint (ESLint)"
+        entry: bash -c 'cd frontend && npx eslint src/ --max-warnings 0'
+        language: system
+        pass_filenames: false
+        files: ^frontend/.*\.(ts|tsx)$  # Only run on TypeScript/TSX files
+
+      # ── TypeScript: Prettier Formatting ───────────────────────────────
+      # Prettier ensures consistent formatting across all TypeScript files.
+      # --check mode fails if any file needs formatting changes.
+      - id: prettier-check
+        name: "⚡ TypeScript format check (Prettier)"
+        entry: bash -c 'cd frontend && npx prettier --check src/'
+        language: system
+        pass_filenames: false
+        files: ^frontend/.*\.(ts|tsx|json|css)$
+
+      # ── TypeScript: Type Checking ──────────────────────────────────────
+      # tsc --noEmit runs the TypeScript compiler for type checking only
+      # (--noEmit means "check types but don't actually generate .js files")
+      - id: tsc
+        name: "⚡ TypeScript type check (tsc)"
+        entry: bash -c 'cd frontend && npx tsc --noEmit'
+        language: system
+        pass_filenames: false
+        files: ^frontend/.*\.(ts|tsx)$

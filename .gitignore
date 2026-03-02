@@ -1,0 +1,68 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# LegacyLens — .gitignore
+# Tells git which files to never track or commit.
+# ─────────────────────────────────────────────────────────────────────────────
+
+# ── Secrets (CRITICAL — never commit these) ──────────────────────────────────
+.env
+.env.local
+.env.production
+backend/.env
+frontend/.env.local
+*.pem
+*.key
+
+# ── Python ────────────────────────────────────────────────────────────────────
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+*.egg
+dist/
+build/
+.eggs/
+.venv/
+venv/
+env/
+
+# Python tooling caches
+.mypy_cache/
+.ruff_cache/
+.pytest_cache/
+htmlcov/           # pytest-cov HTML report
+coverage.xml
+.coverage
+
+# Mutation testing artifacts
+.mutmut-cache
+
+# ── Node.js / Next.js ──────────────────────────────────────────────────────────
+node_modules/
+.next/
+out/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# ── macOS ─────────────────────────────────────────────────────────────────────
+.DS_Store
+.AppleDouble
+.LSOverride
+
+# ── IDE / Editor ──────────────────────────────────────────────────────────────
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# ── Data directory (local COBOL codebase clone — too large for git) ───────────
+data/*
+!data/.gitkeep
+
+# ── Logs ──────────────────────────────────────────────────────────────────────
+*.log
+logs/
+
+# ── Docker ────────────────────────────────────────────────────────────────────
+.docker/

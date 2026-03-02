@@ -1,0 +1,9 @@
+{
+  "_comment": "Prettier config. Prettier is like an auto-formatter — it rewrites code to look consistent across the whole project, so nobody argues about tabs vs spaces.",
+  "semi": false,
+  "singleQuote": true,
+  "tabWidth": 2,
+  "trailingComma": "es5",
+  "printWidth": 100,
+  "plugins": ["prettier-plugin-tailwindcss"]
+}

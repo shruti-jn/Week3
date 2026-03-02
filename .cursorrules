@@ -1,0 +1,407 @@
+# LegacyLens — Cursor AI Rules
+# These rules guide Cursor's AI code generation for this entire project.
+# Cursor reads this file for every file in the workspace.
+
+## Project Overview
+
+LegacyLens is a RAG (Retrieval-Augmented Generation) system that answers natural-language
+questions about legacy COBOL code. Think of it as Google Search, but for old business code.
+
+- Backend: Python 3.12, FastAPI, LangChain (selective), Pydantic v2, pytest
+- Frontend: Next.js 14 App Router, TypeScript 5, Tailwind CSS, NextAuth.js
+- Vector DB: Pinecone (serverless, cosine similarity, 1536 dims)
+- Embeddings: OpenAI text-embedding-3-small
+- LLM: GPT-4o-mini (streaming answers via SSE)
+- Deployment: Railway (backend, port 8000) + Vercel (frontend, port 3000)
+
+---
+
+## Python Code Style
+
+### Language Features
+- Python 3.12 features are allowed: match statements, `type X = ...` syntax
+- Use `str | None` instead of `Optional[str]`
+- Use `list[str]` instead of `List[str]`, `dict[str, Any]` instead of `Dict[str, Any]`
+- Use `pathlib.Path` instead of `os.path` for all file system operations
+- Use `logging.getLogger(__name__)` instead of `print()` for all output
+
+### Type Annotations
+- All functions must have complete type annotations (parameters + return type)
+- All class attributes must have type annotations
+- Pydantic v2 syntax: use `model_validator`, `field_validator` (not the old `validator`)
+- Never use bare `Any` without a comment explaining why it's unavoidable
+
+### Async
+- All FastAPI endpoints must be `async def` — synchronous endpoints are not allowed
+- Use `asyncio.gather()` for parallel external API calls (don't call them one at a time)
+
+### Formatting
+- Line length: 88 characters (ruff default)
+- Quotes: double quotes
+- Indentation: 4 spaces
+
+---
+
+## TypeScript Code Style
+
+### Strictness
+- Strict TypeScript only — no implicit `any`, no `any` without a comment
+- Use `type` for object shapes, `interface` for extendable contracts
+- Use `const` assertions where values won't change
+- Use consistent-type-imports: `import type { Foo } from './foo'` for type-only imports
+
+### Functions and Components
+- Arrow function components: `const MyComponent = () => { ... }`
+- Named exports only — except Next.js page/layout files (which require default exports)
+- Explicit return types for non-trivial functions
+
+### Styling
+- Tailwind CSS for all styling — no inline styles, no CSS modules, no styled-components
+- Use `clsx` or `cn()` utility for conditional class names
+
+### No Console
+- No `console.log` in production code — use `console.error` only for genuine errors
+
+---
+
+## Backend Architecture Patterns
+
+### New Endpoint Checklist (follow this order every time)
+1. Add Pydantic request/response models to `backend/app/models/`
+2. Write the unit test for the core function (test comes first — TDD)
+3. Add the core logic function to `backend/app/core/` (pure function, no FastAPI imports)
+4. Add the route handler to `backend/app/api/v1/` (thin: validate → call core → return)
+5. Register the router in `backend/app/api/v1/router.py`
+
+### Dependency Injection Pattern
+```python
+# In backend/app/dependencies.py
+from functools import lru_cache
+from pinecone import Pinecone
+from openai import AsyncOpenAI
+
+@lru_cache
+def get_settings() -> Settings:
+    return Settings()
+
+def get_pinecone_client() -> Pinecone:
+    settings = get_settings()
+    return Pinecone(api_key=settings.pinecone_api_key)
+
+def get_openai_client() -> AsyncOpenAI:
+    settings = get_settings()
+    return AsyncOpenAI(api_key=settings.openai_api_key)
+
+# In route handlers:
+async def query_endpoint(
+    request: QueryRequest,
+    pinecone: Pinecone = Depends(get_pinecone_client),
+    openai: AsyncOpenAI = Depends(get_openai_client),
+) -> QueryResponse:
+    ...
+```
+
+### Error Handling Pattern
+- Core functions raise domain-specific exceptions (e.g., `NoRelevantChunksError`)
+- Route handlers catch domain exceptions and translate them to `HTTPException`
+- Never return error dicts — always raise `HTTPException(status_code=..., detail=...)`
+
+### Settings Pattern
+```python
+# backend/app/config.py — all config from environment variables, never hardcoded
+from pydantic_settings import BaseSettings, SettingsConfigDict
+
+class Settings(BaseSettings):
+    """
+    All application configuration loaded from environment variables.
+
+    This keeps secrets out of the code. Every value here must exist as
+    an environment variable (or in .env during development).
+    """
+    openai_api_key: str
+    pinecone_api_key: str
+    pinecone_index_name: str
+    pinecone_environment: str
+    github_client_id: str
+    github_client_secret: str
+    nextauth_secret: str
+    allowed_origins: list[str] = ["http://localhost:3000"]
+
+    model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8")
+```
+
+---
+
+## COBOL Chunker Patterns
+
+### Primary Pattern (Paragraph-Level)
+```python
+import re
+from dataclasses import dataclass
+
+@dataclass
+class CodeChunk:
+    """
+    One piece of a COBOL file — like one chapter of a book.
+
+    Contains the actual code, plus metadata (where it is, what it's called)
+    so we can show users exactly where to look when we find a relevant answer.
+    """
+    content: str           # The actual COBOL code lines
+    file_path: str         # Which file this came from
+    start_line: int        # Line number where this chunk starts
+    end_line: int          # Line number where this chunk ends
+    paragraph_name: str | None  # COBOL paragraph label (None for fixed-size chunks)
+    division: str | None   # Which COBOL DIVISION this is in (PROCEDURE, DATA, etc.)
+
+class CobolChunker:
+    # COBOL paragraphs are labels that end with a period at the start of a line.
+    # They follow the Area B convention (columns 8+) and use letters, digits, dashes.
+    PARAGRAPH_PATTERN = re.compile(r'^([A-Z][A-Z0-9-]*)\.$', re.MULTILINE)
+
+    def chunk(self, content: str, file_path: str) -> list[CodeChunk]:
+        """Try paragraph splitting first; fall back to fixed-size if none found."""
+        paragraphs = self._find_paragraphs(content)
+        if paragraphs:
+            return self._paragraph_chunks(content, file_path, paragraphs)
+        return self._fixed_size_chunks(content, file_path)
+```
+
+### Fallback Pattern (Fixed-Size with Overlap)
+```python
+CHUNK_SIZE = 400    # lines per chunk
+OVERLAP = 40        # overlap lines between chunks (prevents cutting mid-thought)
+
+def _fixed_size_chunks(self, content: str, file_path: str) -> list[CodeChunk]:
+    """
+    Cut the file into equal-sized pieces when no paragraph boundaries exist.
+
+    We overlap each chunk by 40 lines so we don't accidentally cut a logical
+    statement in half (COBOL statements can span multiple lines).
+    """
+    lines = content.splitlines()
+    chunks = []
+    for i in range(0, len(lines), CHUNK_SIZE - OVERLAP):
+        chunk_lines = lines[i:i + CHUNK_SIZE]
+        chunks.append(CodeChunk(
+            content="\n".join(chunk_lines),
+            file_path=file_path,
+            start_line=i + 1,       # +1 because line numbers start at 1, not 0
+            end_line=i + len(chunk_lines),
+            paragraph_name=None,    # No paragraph found
+            division=None,
+        ))
+    return chunks
+```
+
+---
+
+## Retrieval Pipeline Patterns
+
+### Standard Retrieval Flow
+```python
+async def retrieve(
+    query: str,
+    pinecone_client: Pinecone,
+    openai_client: AsyncOpenAI,
+    top_k: int = 10,
+) -> list[SearchResult]:
+    """
+    Find the most relevant COBOL code chunks for a user's question.
+
+    Steps (like a librarian finding the right book):
+    1. Turn the question into a number array (embedding)
+    2. Search Pinecone for similar arrays (find similar code)
+    3. Re-rank results to boost ones that share keywords with the question
+    4. Filter out weak matches (score < 0.75 means not relevant enough)
+    5. Return the top 5 best matches
+    """
+    # Step 1: Convert the question to an embedding vector
+    query_embedding = await embed_query(query, openai_client)
+
+    # Step 2: Find the 10 most similar chunks in Pinecone
+    raw_results = await search_pinecone(query_embedding, pinecone_client, top_k=top_k)
+
+    # Step 3: Boost results that share keywords with the original question
+    reranked = rerank_by_keyword_overlap(raw_results, query)
+
+    # Step 4: Only keep results with similarity score >= 0.75
+    # Below 0.75 means the AI isn't confident enough — we won't risk a wrong answer
+    filtered = [r for r in reranked[:5] if r.score >= 0.75]
+
+    return filtered
+```
+
+### Streaming Response Pattern
+```python
+from fastapi.responses import StreamingResponse
+from collections.abc import AsyncGenerator
+
+async def stream_answer(
+    context: str,
+    query: str,
+    openai_client: AsyncOpenAI,
+) -> AsyncGenerator[str, None]:
+    """
+    Stream the AI's answer word-by-word instead of waiting for the full response.
+
+    This is like how ChatGPT shows words appearing as they're generated,
+    rather than waiting for the entire answer to be ready.
+    Each yielded string is one chunk of the Server-Sent Events (SSE) format.
+    """
+    async for chunk in openai_client.chat.completions.stream(
+        model="gpt-4o-mini",
+        messages=[{"role": "user", "content": build_prompt(context, query)}],
+    ):
+        if chunk.choices[0].delta.content:
+            # SSE format: "data: <content>\n\n" — the browser knows how to read this
+            yield f"data: {chunk.choices[0].delta.content}\n\n"
+
+    # Signal to the browser that the stream is finished
+    yield "data: [DONE]\n\n"
+
+# In the route handler:
+return StreamingResponse(
+    stream_answer(context, query, openai_client),
+    media_type="text/event-stream",
+    headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+)
+```
+
+---
+
+## Frontend Architecture Patterns
+
+### API Client Pattern (src/lib/api.ts)
+```typescript
+// All backend calls go through this file — never use raw fetch() in components.
+// This gives us one place to add auth headers, handle errors, and change the base URL.
+
+const API_BASE = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:8000'
+
+export async function queryCode(
+  query: string,
+  token: string,
+): Promise<QueryResponse> {
+  const response = await fetch(`${API_BASE}/api/v1/query`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${token}`,
+    },
+    body: JSON.stringify({ query }),
+  })
+
+  if (!response.ok) {
+    // Throw a typed error so callers can handle it properly
+    throw new ApiError(response.status, await response.text())
+  }
+
+  return response.json() as Promise<QueryResponse>
+}
+```
+
+### Server vs Client Component Decision
+```
+// Use Server Component (no 'use client') when:
+// - Fetching initial data on page load
+// - No user interaction needed (not a button, form, or click handler)
+// - No browser-only APIs (no window, localStorage, etc.)
+
+// Use Client Component ('use client') when:
+// - User clicks, types, or interacts with the component
+// - Using React hooks (useState, useEffect, useRef)
+// - Showing real-time streaming updates
+// - Using browser APIs
+```
+
+---
+
+## Test Patterns
+
+### Python (pytest)
+
+File naming: `test_<module_name>.py`
+Class naming: `Test<ClassName>`
+Method naming: `test_<behavior>_when_<condition>`
+
+```python
+class TestCobolChunker:
+    def test_detects_paragraph_boundary_when_label_is_present(
+        self,
+        sample_cobol_content: str,  # fixture from conftest.py
+    ) -> None:
+        chunker = CobolChunker()
+        chunks = chunker.chunk(sample_cobol_content, "sample.cob")
+        paragraph_names = [c.paragraph_name for c in chunks]
+        assert "CALCULATE-INTEREST" in paragraph_names
+
+    def test_raises_value_error_when_content_is_empty(self) -> None:
+        chunker = CobolChunker()
+        with pytest.raises(ValueError, match="cannot chunk empty content"):
+            chunker.chunk("", "empty.cob")
+```
+
+Mocking external APIs (always mock — never call real APIs in unit tests):
+```python
+def test_embed_query_returns_vector_of_correct_size(
+    mock_openai_client: AsyncMock,  # fixture from conftest.py
+) -> None:
+    # mock_openai_client is already set up in conftest.py to return [0.1] * 1536
+    result = asyncio.run(embed_query("find interest calculation", mock_openai_client))
+    assert len(result) == 1536
+```
+
+### TypeScript (Jest + React Testing Library)
+
+Test user behavior, not implementation details:
+```tsx
+// GOOD: Tests what the user sees and can do
+it('shows error message when query returns no results', async () => {
+  server.use(/* MSW handler that returns empty results */)
+  render(<QueryInput />)
+  await userEvent.type(screen.getByRole('searchbox'), 'nonexistent query')
+  await userEvent.click(screen.getByRole('button', { name: /search/i }))
+  expect(await screen.findByText(/no results found/i)).toBeInTheDocument()
+})
+
+// BAD: Tests implementation details (breaks on refactoring)
+it('calls setResults with empty array', () => {
+  const setResults = jest.fn()
+  // ... testing internal state management
+})
+```
+
+---
+
+## Security Rules
+
+- NEVER hardcode API keys, secrets, or tokens anywhere in the code
+- Backend secrets: load from environment via `app/config.py` Settings class
+- Frontend secrets: never put secrets in frontend code or `NEXT_PUBLIC_` variables
+- `NEXT_PUBLIC_` variables are visible to the browser — only use for non-sensitive config
+- CORS: restrict to `NEXT_PUBLIC_API_URL` only — no wildcard (`*`) in production
+- Auth tokens: stored in httpOnly cookies (set by NextAuth) — never in localStorage
+
+---
+
+## Performance Rules
+
+- Batch OpenAI embedding calls — never embed one chunk at a time (use batches of 100)
+- Use `asyncio.gather()` for parallel external API calls
+- Cache the Pinecone client instance with `@lru_cache` — don't recreate on every request
+- Limit retrieved context to top 5 chunks — avoids hitting GPT-4o-mini's context limit
+- Enable streaming for answer generation — users see results immediately instead of waiting
+
+---
+
+## Do Not
+
+- Do not use `any` in TypeScript without a comment
+- Do not use `print()` in Python — use `logging`
+- Do not make real OpenAI or Pinecone calls in unit tests — mock them
+- Do not commit `.env` or `.env.local`
+- Do not create TODO comments — open a GitHub issue instead
+- Do not suppress linting without a reason comment (`# noqa: <code>  # reason here`)
+- Do not write synchronous FastAPI endpoints
+- Do not import FastAPI types into `app/core/` modules

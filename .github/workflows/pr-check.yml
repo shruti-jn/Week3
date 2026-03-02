@@ -1,0 +1,61 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# PR Title Format Check
+# ─────────────────────────────────────────────────────────────────────────────
+# This lightweight workflow checks that every pull request title follows
+# the Conventional Commits format:
+#   <type>(<scope>): <description>
+#   e.g. feat(chunker): add paragraph boundary detection
+#
+# Why does this matter?
+# - Consistent titles make git history readable (like a changelog)
+# - Squash merges use the PR title as the commit message
+# - Tools can auto-generate changelogs from Conventional Commit messages
+#
+# If the title format is wrong, this check fails and shows the developer
+# exactly what format to use.
+# ─────────────────────────────────────────────────────────────────────────────
+
+name: PR Title Check
+
+on:
+  pull_request:
+    types: [opened, edited, synchronize, reopened]
+
+jobs:
+  pr-title:
+    name: "📋 Validate PR Title Format"
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check PR title follows Conventional Commits
+        uses: amannn/action-semantic-pull-request@v5
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          # Allowed commit types — must match the types in CLAUDE.md
+          types: |
+            feat
+            fix
+            chore
+            test
+            docs
+            refactor
+            perf
+          # Allowed scopes — must match the scopes in CLAUDE.md
+          scopes: |
+            ingestion
+            retrieval
+            api
+            frontend
+            auth
+            infra
+            chunker
+            embedder
+          # Allow breaking changes (e.g. feat(api)!: change response schema)
+          requireScope: false
+          # Fail with a helpful error message showing the expected format
+          subjectPattern: ^(?![A-Z]).+$
+          subjectPatternError: |
+            The PR title description must start with a lowercase letter.
+            Expected format: feat(chunker): add paragraph boundary detection
+            Got: {subject}

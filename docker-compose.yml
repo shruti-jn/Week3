@@ -1,0 +1,93 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# Docker Compose — Local Development
+# ─────────────────────────────────────────────────────────────────────────────
+# Docker Compose lets you run the entire LegacyLens system locally
+# with a single command: docker compose up
+#
+# Think of it like a recipe for starting multiple services at once:
+# - Backend (FastAPI Python server)
+# - Frontend (Next.js React app)
+#
+# Note: Pinecone and OpenAI are external cloud services — they don't run locally.
+# You need .env files with real API keys for those.
+#
+# Usage:
+#   Start all services: docker compose up
+#   Start in background: docker compose up -d
+#   Stop all: docker compose down
+#   Rebuild after code changes: docker compose up --build
+#   View logs: docker compose logs -f backend
+# ─────────────────────────────────────────────────────────────────────────────
+
+version: "3.9"
+
+services:
+
+  # ──────────────────────────────────────────────────────────────────────────
+  # Backend: FastAPI Python API
+  # Runs on http://localhost:8000
+  # ──────────────────────────────────────────────────────────────────────────
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: legacylens-backend
+
+    # Port mapping: host port 8000 → container port 8000
+    # Access the API at http://localhost:8000
+    # API docs at http://localhost:8000/docs (Swagger UI)
+    ports:
+      - "8000:8000"
+
+    # Load environment variables from backend/.env
+    # This file contains API keys — never commit it to git
+    env_file:
+      - ./backend/.env
+
+    # Mount the backend source code into the container.
+    # This means code changes appear immediately without rebuilding.
+    volumes:
+      - ./backend:/app
+
+    # Only start backend after checking it's healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+
+    # Auto-restart if the container crashes (useful for development)
+    restart: unless-stopped
+
+  # ──────────────────────────────────────────────────────────────────────────
+  # Frontend: Next.js React Application
+  # Runs on http://localhost:3000
+  # ──────────────────────────────────────────────────────────────────────────
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: legacylens-frontend
+
+    # Port mapping: host port 3000 → container port 3000
+    # Access the app at http://localhost:3000
+    ports:
+      - "3000:3000"
+
+    # Load environment variables from frontend/.env.local
+    env_file:
+      - ./frontend/.env.local
+
+    # Mount source code for live reloading
+    volumes:
+      - ./frontend:/app
+      - /app/node_modules  # Don't mount node_modules (use container's version)
+      - /app/.next         # Don't mount .next build artifacts
+
+    # Frontend needs the backend to be running first
+    depends_on:
+      backend:
+        condition: service_healthy
+
+    restart: unless-stopped
