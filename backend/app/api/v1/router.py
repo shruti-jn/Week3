@@ -13,57 +13,100 @@ To add a new endpoint:
 
 from fastapi import APIRouter
 
-# Import individual feature routers
-# (These files will be created as we build each feature branch)
+from app.models.requests import (
+    BusinessLogicRequest,
+    DependenciesRequest,
+    ExplainRequest,
+    ImpactRequest,
+    QueryRequest,
+)
+from app.models.responses import (
+    BusinessLogicResponse,
+    DependenciesResponse,
+    ExplainResponse,
+    ImpactResponse,
+    QueryResponse,
+    StubResponse,
+)
 
 api_router = APIRouter()
 
 
 # ── Placeholder: Query endpoint ──────────────────────────────────────────────
-# This stub returns a hardcoded response while the real implementation
-# is being built. This lets the frontend connect and test the API contract
-# even before the retrieval pipeline is ready.
+# This stub accepts a proper typed request body while the real implementation
+# is being built in feature/api-full-pipeline.
 #
-# TODO (feature/api-full-pipeline): Replace stub with real implementation
-@api_router.post("/query", tags=["query"])
-async def query_stub() -> dict[str, str]:
+# Replaced by: feature/api-full-pipeline
+@api_router.post("/query", response_model=StubResponse, tags=["query"])
+async def query_stub(request: QueryRequest) -> StubResponse:
     """
     Stub: Query the COBOL codebase with a natural language question.
 
-    TEMPORARY: Returns a hardcoded response.
-    Replace with the real implementation in feature/api-full-pipeline.
+    TEMPORARY: Returns a hardcoded stub response. Input validation via
+    QueryRequest is live — the full pipeline (embedding, retrieval, generation)
+    is wired in feature/api-full-pipeline.
+
+    Args:
+        request: Validated query with plain-English question and top_k setting.
+
+    Returns:
+        StubResponse with status="stub" until the pipeline is implemented.
     """
-    return {
-        "status": "stub",
-        "message": "Query endpoint not yet implemented — this is a scaffold stub",
-        "answer": "",
-        "chunks": "[]",
-    }
+    # Log the query so we can see it in Railway logs even during the stub phase
+    _ = request  # will be used when real logic is wired
+    return StubResponse(
+        status="stub",
+        message="Query endpoint not yet implemented — this is a scaffold stub",
+    )
 
 
 # ── Placeholder: Explain endpoint ─────────────────────────────────────────────
-@api_router.post("/explain", tags=["features"])
-async def explain_stub() -> dict[str, str]:
-    """Stub: Code Explanation feature (Feature 1). Replace in feature/api-feature-endpoints."""
-    return {"status": "stub", "message": "Not yet implemented"}
+@api_router.post("/explain", response_model=ExplainResponse, tags=["features"])
+async def explain_stub(request: ExplainRequest) -> ExplainResponse:
+    """Stub: Code Explanation feature (Feature 1). Replaced in feature/api-code-features."""
+    _ = request
+    return ExplainResponse(
+        status="stub",
+        message="Not yet implemented",
+        paragraph_name=request.paragraph_name,
+    )
 
 
 # ── Placeholder: Dependencies endpoint ────────────────────────────────────────
-@api_router.post("/dependencies", tags=["features"])
-async def dependencies_stub() -> dict[str, str]:
-    """Stub: Dependency Mapping feature (Feature 2). Replace in feature/api-feature-endpoints."""
-    return {"status": "stub", "message": "Not yet implemented"}
+@api_router.post(
+    "/dependencies", response_model=DependenciesResponse, tags=["features"]
+)
+async def dependencies_stub(request: DependenciesRequest) -> DependenciesResponse:
+    """Stub: Dependency Mapping feature (Feature 2). Replaced in feature/api-code-features."""
+    _ = request
+    return DependenciesResponse(
+        status="stub",
+        message="Not yet implemented",
+        paragraph_name=request.paragraph_name,
+    )
 
 
 # ── Placeholder: Business Logic endpoint ──────────────────────────────────────
-@api_router.post("/business-logic", tags=["features"])
-async def business_logic_stub() -> dict[str, str]:
-    """Stub: Business Logic Extraction feature (Feature 3). Replace in feature/api-feature-endpoints."""
-    return {"status": "stub", "message": "Not yet implemented"}
+@api_router.post(
+    "/business-logic", response_model=BusinessLogicResponse, tags=["features"]
+)
+async def business_logic_stub(request: BusinessLogicRequest) -> BusinessLogicResponse:
+    """Stub: Business Logic Extraction feature (Feature 3). Replaced in feature/api-code-features."""
+    _ = request
+    return BusinessLogicResponse(
+        status="stub",
+        message="Not yet implemented",
+        file_path=request.file_path,
+    )
 
 
 # ── Placeholder: Impact Analysis endpoint ─────────────────────────────────────
-@api_router.post("/impact", tags=["features"])
-async def impact_stub() -> dict[str, str]:
-    """Stub: Impact Analysis feature (Feature 4). Replace in feature/api-feature-endpoints."""
-    return {"status": "stub", "message": "Not yet implemented"}
+@api_router.post("/impact", response_model=ImpactResponse, tags=["features"])
+async def impact_stub(request: ImpactRequest) -> ImpactResponse:
+    """Stub: Impact Analysis feature (Feature 4). Replaced in feature/api-code-features."""
+    _ = request
+    return ImpactResponse(
+        status="stub",
+        message="Not yet implemented",
+        paragraph_name=request.paragraph_name,
+    )

@@ -23,8 +23,8 @@ dependencies = [
     "langchain>=0.2",
     "langchain-openai>=0.1",
     "langchain-pinecone>=0.1",
-    # Pinecone vector database client
-    "pinecone-client>=4.1",
+    # Pinecone vector database client (package renamed from pinecone-client to pinecone in v3+)
+    "pinecone>=5.0",
     # HTTP client — used for testing and internal service calls
     "httpx>=0.27",
     # JWT validation for auth tokens from NextAuth

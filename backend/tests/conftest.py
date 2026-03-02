@@ -10,17 +10,33 @@ Fixtures defined here are available to all test files in the
 tests/ directory without needing to import them.
 """
 
-import asyncio
+import os
 from collections.abc import AsyncGenerator
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 from httpx import ASGITransport, AsyncClient
 
 
 # ─────────────────────────────────────────────────────────────────────────────
+# Test environment setup
+# ─────────────────────────────────────────────────────────────────────────────
+
+# Set required environment variables before any app code is imported.
+# This prevents pydantic-settings from failing when .env doesn't exist in CI.
+# These values are fake — the real services are always mocked in unit tests.
+os.environ.setdefault("OPENAI_API_KEY", "sk-test-fake-key-for-unit-tests")
+os.environ.setdefault("PINECONE_API_KEY", "pctest-fake-key-for-unit-tests")
+os.environ.setdefault("PINECONE_INDEX_NAME", "legacylens-test")
+os.environ.setdefault("GITHUB_CLIENT_ID", "test-github-client-id")
+os.environ.setdefault("GITHUB_CLIENT_SECRET", "test-github-client-secret")
+os.environ.setdefault("NEXTAUTH_SECRET", "test-nextauth-secret-32chars-long!!")
+
+
+# ─────────────────────────────────────────────────────────────────────────────
 # COBOL sample fixture
 # ─────────────────────────────────────────────────────────────────────────────
+
 
 @pytest.fixture
 def sample_cobol_content() -> str:
@@ -94,6 +110,7 @@ def sample_cobol_windows_line_endings() -> str:
 # OpenAI Mock
 # ─────────────────────────────────────────────────────────────────────────────
 
+
 @pytest.fixture
 def mock_openai_client() -> AsyncMock:
     """
@@ -144,6 +161,7 @@ def mock_openai_client() -> AsyncMock:
 # ─────────────────────────────────────────────────────────────────────────────
 # Pinecone Mock
 # ─────────────────────────────────────────────────────────────────────────────
+
 
 @pytest.fixture
 def mock_pinecone_client() -> MagicMock:
@@ -230,6 +248,7 @@ def mock_pinecone_empty() -> MagicMock:
 # FastAPI Test Client
 # ─────────────────────────────────────────────────────────────────────────────
 
+
 @pytest.fixture
 async def test_client(
     mock_openai_client: AsyncMock,
@@ -251,8 +270,12 @@ async def test_client(
             assert response.status_code == 200
     """
     # We import here (not at top level) to avoid circular imports during testing
+    from app.config import get_settings
     from app.dependencies import get_openai_client, get_pinecone_client
     from app.main import create_app
+
+    # Clear the lru_cache so pydantic-settings re-reads the env vars set above
+    get_settings.cache_clear()
 
     app = create_app()
 
