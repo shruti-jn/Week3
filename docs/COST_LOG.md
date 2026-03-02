@@ -46,11 +46,17 @@ This runs once — embeddings are stored and reused for all queries.
 |-------|------|--------------|-----------|----------------|-----------------|------|
 | 1 | — | — | — | — | — | — |
 
-**Expected cost estimate:**
-- GnuCOBOL Contrib: ~10,000 LOC → ~250 chunks (at 400 lines/chunk)
-- Each chunk: ~300 tokens average
-- Total embedding tokens: 250 × 300 = 75,000 tokens
-- Cost: 75,000 / 1,000,000 × $0.02 = **~$0.0015** (essentially free)
+**Actual codebase stats (cloned 2026-03-02):**
+- Source: https://github.com/OCamlPro/gnucobol-contrib
+- .cob files: 331 | .cbl files: 246 | .cpy copybooks: 214
+- Total COBOL source files (cob + cbl): 577
+- Total lines of code: 251,881
+
+**Expected cost estimate (revised):**
+- 577 COBOL files → ~6,300 chunks (at ~40 lines/chunk, paragraph-level)
+- Each chunk: ~200 tokens average
+- Total embedding tokens: 6,300 × 200 = 1,260,000 tokens
+- Cost: 1,260,000 / 1,000,000 × $0.02 = **~$0.025** (essentially free)
 
 ---
 
