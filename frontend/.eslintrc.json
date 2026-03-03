@@ -1,5 +1,4 @@
 {
-  "_comment": "ESLint configuration for LegacyLens frontend. ESLint is like a spell checker for code — it catches bugs and style issues before they become problems.",
   "extends": [
     "next/core-web-vitals",
     "next/typescript",

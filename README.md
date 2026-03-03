@@ -200,9 +200,16 @@ cd frontend && npm run test:coverage
 
 ## Deployment
 
-- **Frontend:** Deploy to Vercel — connect the GitHub repo, set env vars in Vercel dashboard
-- **Backend:** Deploy to Railway — connect the GitHub repo, set env vars in Railway dashboard
-- **Pinecone:** Create index in Pinecone console (1536 dims, cosine similarity, serverless)
+Backend and frontend are configured for one-click deploy from GitHub.
+
+| Platform   | Root directory | Config |
+|-----------|----------------|--------|
+| **Backend**  | `backend`  | `backend/railway.toml`, `backend/Dockerfile` |
+| **Frontend** | `frontend` | `frontend/vercel.json`, `frontend/.env.example` |
+
+- **Railway (backend):** New project → Deploy from GitHub → set Root Directory to `backend`. Add env vars (see comments in `backend/railway.toml`). Health check: `GET /health`.
+- **Vercel (frontend):** Import repo → set Root Directory to `frontend`. Add env vars (see `frontend/.env.example` and `frontend/vercel.json`). Set `NEXT_PUBLIC_API_URL` to your Railway backend URL.
+- **Pinecone:** Create index in Pinecone console (1536 dims, cosine similarity, serverless). Set `PINECONE_INDEX_NAME` (and API key) in Railway.
 
 ---
 

@@ -1,0 +1,53 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# Railway Deployment Configuration — LegacyLens Backend
+# ─────────────────────────────────────────────────────────────────────────────
+# This file tells Railway how to build and run the FastAPI server.
+#
+# SETUP INSTRUCTIONS (do once in the Railway dashboard):
+#   1. Create a new Railway project
+#   2. Add a new service → "Deploy from GitHub repo"
+#   3. Set "Root Directory" to: backend
+#      (This tells Railway to treat backend/ as the project root,
+#       so this railway.toml and the Dockerfile are both found correctly.)
+#   4. Add the following environment variables in Railway's Variables tab:
+#      - OPENAI_API_KEY
+#      - PINECONE_API_KEY
+#      - PINECONE_INDEX_NAME=legacylens
+#      - GITHUB_CLIENT_ID
+#      - GITHUB_CLIENT_SECRET
+#      - NEXTAUTH_SECRET
+#      - ALLOWED_ORIGINS=["https://your-app.vercel.app"]
+#      - ENVIRONMENT=production
+#      - RATE_LIMIT_PER_MINUTE=20
+#      - RETRIEVAL_TOP_K=10
+#      - SIMILARITY_THRESHOLD=0.75
+#   5. Deploy — Railway builds the Dockerfile and starts the server.
+#
+# Docs: https://docs.railway.app/reference/config-as-code
+# ─────────────────────────────────────────────────────────────────────────────
+
+[build]
+# Build using the Dockerfile in this directory (backend/Dockerfile).
+# Railway sets the build context to the service root directory (backend/).
+builder = "dockerfile"
+dockerfilePath = "Dockerfile"
+
+[deploy]
+# Start the server on the port Railway assigns at runtime.
+# $PORT is injected by Railway — never hardcode 8000 here.
+# --host 0.0.0.0 binds to all interfaces (required in Docker).
+startCommand = "uvicorn app.main:app --host 0.0.0.0 --port $PORT"
+
+# Railway calls this endpoint to verify the server is alive.
+# Must return HTTP 200 within healthcheckTimeout seconds after deploy,
+# or Railway marks the deployment as failed and rolls back.
+healthcheckPath = "/health"
+
+# Maximum seconds to wait for the first successful health check.
+# 300s (5 min) gives pip install + server startup enough time.
+healthcheckTimeout = 300
+
+# Automatically restart the container if it crashes.
+# "on_failure" = restart only on non-zero exit code (not on manual stops).
+restartPolicyType = "on_failure"
+restartPolicyMaxRetries = 10

@@ -1,0 +1,67 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# Backend Docker ignore file
+# ─────────────────────────────────────────────────────────────────────────────
+# Files and directories listed here are EXCLUDED from the Docker build context.
+# Think of it like .gitignore but for Docker: anything here is invisible to
+# the Dockerfile's COPY commands.
+#
+# Why exclude things?
+#   1. Smaller build context = faster image builds (less data sent to Docker daemon)
+#   2. Prevents accidentally baking secrets (.env) into the image
+#   3. Avoids overwriting container-installed packages with local dev artifacts
+# ─────────────────────────────────────────────────────────────────────────────
+
+# ── Python build artifacts ─────────────────────────────────────────────────────
+# These are generated locally and don't belong in the image.
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+*.egg-info/
+.eggs/
+dist/
+build/
+
+# ── Virtual environment ────────────────────────────────────────────────────────
+# The container installs its own packages via pip install. Never copy the local
+# venv — it's tied to the host OS and architecture.
+.venv/
+venv/
+env/
+
+# ── Test infrastructure ────────────────────────────────────────────────────────
+# Tests and coverage reports are not needed to run the server.
+tests/
+htmlcov/
+.pytest_cache/
+coverage.xml
+.coverage
+mutmut_cache/
+
+# ── Development tools ──────────────────────────────────────────────────────────
+.mypy_cache/
+.ruff_cache/
+.pre-commit-config.yaml
+
+# ── Secrets ───────────────────────────────────────────────────────────────────
+# CRITICAL: Never bake .env files into Docker images.
+# Secrets come from Railway environment variables at runtime, not from files.
+.env
+.env.*
+!.env.example
+
+# ── COBOL data files ──────────────────────────────────────────────────────────
+# The gnucobol-contrib source is indexed into Pinecone, not served from disk.
+# Including it would bloat the image by hundreds of MB for no benefit.
+data/
+
+# ── Version control ───────────────────────────────────────────────────────────
+.git/
+.gitignore
+
+# ── macOS system files ────────────────────────────────────────────────────────
+.DS_Store
+
+# ── IDE config ────────────────────────────────────────────────────────────────
+.vscode/
+.idea/
