@@ -1,22 +1,4 @@
 {
-  "_comment": "Vercel deployment configuration for LegacyLens frontend.",
-  "_setup": [
-    "SETUP INSTRUCTIONS (do once in the Vercel dashboard):",
-    "1. Import your GitHub repo in Vercel",
-    "2. Set 'Root Directory' to: frontend",
-    "   (This tells Vercel the Next.js app is in the frontend/ subdirectory)",
-    "3. Framework Preset: Next.js (auto-detected)",
-    "4. Add environment variables in Vercel's Settings → Environment Variables:",
-    "   - NEXT_PUBLIC_API_URL=https://your-backend.up.railway.app",
-    "   - NEXTAUTH_URL=https://your-app.vercel.app",
-    "   - NEXTAUTH_SECRET=<same value as backend NEXTAUTH_SECRET>",
-    "   - GITHUB_CLIENT_ID=<from github.com/settings/developers>",
-    "   - GITHUB_CLIENT_SECRET=<from github.com/settings/developers>",
-    "5. Update your GitHub OAuth App's callback URLs:",
-    "   - Add: https://your-app.vercel.app/api/auth/callback/github",
-    "6. Deploy — Vercel runs 'npm ci && npm run build' automatically"
-  ],
-
   "framework": "nextjs",
 
   "installCommand": "npm ci",
