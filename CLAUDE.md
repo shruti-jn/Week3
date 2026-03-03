@@ -200,6 +200,12 @@ perf(embedder): switch to batched embedding calls (100 chunks/request)
 - Use `logging.getLogger(__name__)` — never use `print()`
 - Log at `DEBUG` for internal state, `INFO` for request lifecycle events
 - All external API calls (OpenAI, Pinecone) must have retry logic with exponential backoff
+- **Python 3.9/3.12 runtime gap:** `ruff` targets Python 3.12 but the dev runtime is Python 3.9.
+  Syntax that ruff expects but Python 3.9 rejects must use `# noqa` with a reason:
+  - `zip(a, b, strict=True)` → use `zip(a, b)  # noqa: B905 -- strict= requires Python 3.10+; dev runtime is 3.9`
+  - `str | None` in annotations → wrap the file with `from __future__ import annotations` instead
+  - `TypeVar` generic functions → avoid PEP 695 syntax (`def f[T]`); use concrete types or `TypeVar`
+  - Never use `functools.partial` as a workaround inside async loops — prefer named inner functions
 
 **Frontend (Next.js):**
 - App Router only — no Pages Router patterns
