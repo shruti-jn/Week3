@@ -19,6 +19,7 @@ Pipeline position:
 """
 
 import asyncio
+import functools
 import logging
 from dataclasses import dataclass, field
 from typing import Any
@@ -58,7 +59,7 @@ class SearchResult:
 
     Attributes:
         chunk_id:  The Pinecone vector ID (e.g., "programs/payroll.cob::CALC-GROSS").
-        score:     Cosine similarity score (0.0–1.0). Higher = more relevant.
+        score:     Cosine similarity score (0.0-1.0). Higher = more relevant.
         metadata:  The stored metadata dict (file_path, start_line, etc.).
     """
 
@@ -83,12 +84,14 @@ class PineconeWrapper:
 
         client = get_pinecone_client()
         settings = get_settings()
-        wrapper = PineconeWrapper(client=client, index_name=settings.pinecone_index_name)
+        wrapper = PineconeWrapper(
+            client=client, index_name=settings.pinecone_index_name
+        )
 
         results = await wrapper.query(embedding, top_k=5, min_score=0.75)
     """
 
-    def __init__(self, client: Any, index_name: str) -> None:
+    def __init__(self, client: Any, index_name: str) -> None:  # noqa: ANN401 -- Pinecone client lacks stubs; Any is required
         """
         Initialize the wrapper and connect to the named Pinecone index.
 
@@ -146,15 +149,17 @@ class PineconeWrapper:
             ]
 
             # Run the synchronous Pinecone SDK call in an executor so it
-            # doesn't block the async event loop
+            # doesn't block the async event loop.
+            # functools.partial binds pinecone_records at call time, satisfying
+            # B023 (no closure over a loop variable) and letting mypy infer types.
             await asyncio.get_event_loop().run_in_executor(
-                None,  # Use default thread pool
-                lambda records=pinecone_records: self._index.upsert(vectors=records),
+                None,
+                functools.partial(self._index.upsert, vectors=pinecone_records),
             )
 
             total_upserted += len(batch)
             logger.debug(
-                "Upserted batch %d–%d (%d vectors) to index '%s'",
+                "Upserted batch %d-%d (%d vectors) to index '%s'",
                 batch_start,
                 batch_start + len(batch) - 1,
                 len(batch),
@@ -186,9 +191,9 @@ class PineconeWrapper:
 
         Args:
             embedding:  The query embedding vector (1536 floats from OpenAI).
-            top_k:      How many candidates to request from Pinecone (1–20).
+            top_k:      How many candidates to request from Pinecone (1-20).
                         More candidates = slightly better results but more cost.
-            min_score:  Minimum cosine similarity to include in results (0.0–1.0).
+            min_score:  Minimum cosine similarity to include in results (0.0-1.0).
                         Below this threshold, the code is not relevant enough.
                         Project default: 0.75 (from config.similarity_threshold).
 
