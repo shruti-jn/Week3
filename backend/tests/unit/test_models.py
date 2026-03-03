@@ -31,7 +31,6 @@ from app.models.responses import (
     StubResponse,
 )
 
-
 # ─────────────────────────────────────────────────────────────────────────────
 # QueryRequest
 # ─────────────────────────────────────────────────────────────────────────────
@@ -196,7 +195,7 @@ class TestCodeSnippet:
             file_path="samples/payroll.cob",
             start_line=42,
             end_line=67,
-            content="       CALC-GROSS-PAY.\n           MULTIPLY HOURS BY RATE GIVING GROSS-PAY.",
+            content="       CALC-GROSS-PAY.\n           MULTIPLY HOURS BY RATE GIVING GROSS-PAY.",  # noqa: E501
             score=0.92,
         )
         assert snippet.start_line == 42
@@ -404,3 +403,76 @@ class TestFeatureResponses:
             affected_paragraphs=[],
         )
         assert resp.affected_paragraphs == []
+
+
+class TestFeatureResponseFieldValidation:
+    """
+    Tests that Phase 2 response model string fields reject empty strings.
+
+    These tests cover the min_length=1 constraints added after the Phase 1
+    audit. Previously, the models used bare `str` fields with no validation,
+    allowing empty-string bugs to pass through the API layer silently.
+    """
+
+    def test_explain_empty_status_rejected(self) -> None:
+        """ExplainResponse.status must not be empty."""
+        with pytest.raises(ValidationError):
+            ExplainResponse(
+                status="",
+                message="Not yet implemented",
+                paragraph_name="CALC-GROSS-PAY",
+            )
+
+    def test_explain_empty_message_rejected(self) -> None:
+        """ExplainResponse.message must not be empty."""
+        with pytest.raises(ValidationError):
+            ExplainResponse(
+                status="stub",
+                message="",
+                paragraph_name="CALC-GROSS-PAY",
+            )
+
+    def test_explain_empty_paragraph_name_rejected(self) -> None:
+        """ExplainResponse.paragraph_name must not be empty."""
+        with pytest.raises(ValidationError):
+            ExplainResponse(
+                status="stub",
+                message="Not yet implemented",
+                paragraph_name="",
+            )
+
+    def test_dependencies_empty_status_rejected(self) -> None:
+        """DependenciesResponse.status must not be empty."""
+        with pytest.raises(ValidationError):
+            DependenciesResponse(
+                status="",
+                message="Not yet implemented",
+                paragraph_name="CALC-NET-PAY",
+            )
+
+    def test_business_logic_empty_file_path_rejected(self) -> None:
+        """BusinessLogicResponse.file_path must not be empty."""
+        with pytest.raises(ValidationError):
+            BusinessLogicResponse(
+                status="stub",
+                message="Not yet implemented",
+                file_path="",
+            )
+
+    def test_impact_empty_status_rejected(self) -> None:
+        """ImpactResponse.status must not be empty."""
+        with pytest.raises(ValidationError):
+            ImpactResponse(
+                status="",
+                message="Not yet implemented",
+                paragraph_name="CALC-OVERTIME",
+            )
+
+    def test_impact_empty_paragraph_name_rejected(self) -> None:
+        """ImpactResponse.paragraph_name must not be empty."""
+        with pytest.raises(ValidationError):
+            ImpactResponse(
+                status="stub",
+                message="Not yet implemented",
+                paragraph_name="",
+            )

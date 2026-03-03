@@ -15,8 +15,7 @@ from pathlib import Path
 
 import pytest
 
-from app.core.ingestion.file_scanner import COBOLFile, scan_directory
-
+from app.core.ingestion.file_scanner import scan_directory
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Happy path tests
@@ -25,8 +24,8 @@ from app.core.ingestion.file_scanner import COBOLFile, scan_directory
 
 def test_finds_cob_files(tmp_path: Path) -> None:
     """Happy path: scanner finds .cob files in a flat directory."""
-    (tmp_path / "payroll.cob").write_text("IDENTIFICATION DIVISION.\nPROGRAM-ID. PAY.\n")
-    (tmp_path / "loans.cob").write_text("IDENTIFICATION DIVISION.\nPROGRAM-ID. LOANS.\n")
+    (tmp_path / "payroll.cob").write_text("IDENTIFICATION DIVISION.\nPROGRAM-ID. PAY.\n")  # noqa: E501
+    (tmp_path / "loans.cob").write_text("IDENTIFICATION DIVISION.\nPROGRAM-ID. LOANS.\n")  # noqa: E501
 
     results = scan_directory(tmp_path)
 
@@ -155,7 +154,7 @@ def test_single_file(tmp_path: Path) -> None:
 
 
 def test_case_insensitive_extension_cob(tmp_path: Path) -> None:
-    """Uppercase .COB extension should be found (COBOL files on Windows often use uppercase)."""
+    """Uppercase .COB extension is found (Windows COBOL files use uppercase)."""
     (tmp_path / "PAYROLL.COB").write_text("IDENTIFICATION DIVISION.\n")
 
     results = scan_directory(tmp_path)
@@ -247,3 +246,59 @@ def test_cobol_file_extension_includes_dot(tmp_path: Path) -> None:
     results = scan_directory(tmp_path)
 
     assert results[0].extension.startswith(".")
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# PermissionError and line-count behavior tests (added by Phase 1 audit)
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+def test_permission_denied_file_is_skipped(tmp_path: Path) -> None:
+    """
+    A file with no read permissions is logged and skipped, not raised.
+
+    This verifies the PermissionError handling added after the Phase 1 audit.
+    Without this fix, a single unreadable file would abort the entire scan.
+    Skipped on Windows where chmod 000 doesn't block reads for the owner.
+    """
+    import os
+    import sys
+
+    if sys.platform == "win32":
+        pytest.skip("chmod 000 has no effect on Windows")
+
+    readable = tmp_path / "readable.cob"
+    readable.write_text("IDENTIFICATION DIVISION.\n")
+
+    unreadable = tmp_path / "locked.cob"
+    unreadable.write_text("IDENTIFICATION DIVISION.\n")
+    os.chmod(unreadable, 0o000)  # Remove all permissions
+
+    try:
+        results = scan_directory(tmp_path)
+        # The locked file is skipped; only the readable one is returned
+        assert len(results) == 1
+        assert results[0].path.name == "readable.cob"
+    finally:
+        # Restore permissions so tmp_path cleanup doesn't fail
+        os.chmod(unreadable, 0o644)
+
+
+def test_line_count_matches_wc_l_behavior(tmp_path: Path) -> None:
+    """
+    line_count counts newlines (wc -l behavior), not visual text lines.
+
+    A file with 3 lines of text but no trailing newline reports 2,
+    because there are only 2 newline characters. This is intentional:
+    it matches wc -l and is documented in _build_cobol_file's docstring.
+    """
+    # 3 lines of text, but only 2 newline chars (no trailing newline)
+    content_no_trailing_newline = "LINE ONE.\nLINE TWO.\nLINE THREE."
+    (tmp_path / "no_trailing.cob").write_bytes(
+        content_no_trailing_newline.encode("utf-8")
+    )
+
+    results = scan_directory(tmp_path)
+
+    # wc -l counts 2 (two newlines), even though there are 3 visual lines
+    assert results[0].line_count == 2

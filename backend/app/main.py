@@ -43,6 +43,14 @@ def create_app() -> FastAPI:
     """
     settings = get_settings()
 
+    # Disable interactive API docs in production to reduce attack surface.
+    # The /docs and /redoc endpoints expose the full API schema, which could
+    # help an attacker enumerate endpoints. In development they're invaluable.
+    # Set ENVIRONMENT=production in Railway env vars to disable them.
+    is_production = settings.environment == "production"
+    docs_url = None if is_production else "/docs"
+    redoc_url = None if is_production else "/redoc"
+
     app = FastAPI(
         title="LegacyLens API",
         description=(
@@ -50,10 +58,8 @@ def create_app() -> FastAPI:
             "Ask questions about legacy COBOL code in plain English."
         ),
         version="0.1.0",
-        # Disable interactive docs in production to reduce attack surface
-        # (set ENVIRONMENT=production to disable)
-        docs_url="/docs",
-        redoc_url="/redoc",
+        docs_url=docs_url,
+        redoc_url=redoc_url,
     )
 
     # ── CORS Middleware ──────────────────────────────────────────────────
@@ -75,7 +81,9 @@ def create_app() -> FastAPI:
     # Import and register all route handlers.
     # Each router handles one group of related endpoints.
     # Note: We import here (inside the function) to avoid circular imports.
-    from app.api.v1.router import api_router  # noqa: PLC0415
+    from app.api.v1.router import (
+        api_router,
+    )
 
     app.include_router(api_router, prefix="/api/v1")
 

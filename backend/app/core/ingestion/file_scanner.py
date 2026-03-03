@@ -98,7 +98,13 @@ def scan_directory(root: Path) -> list[COBOLFile]:
         if file_path.suffix.lower() not in _COBOL_EXTENSIONS:
             continue
 
-        results.append(_build_cobol_file(file_path))
+        try:
+            results.append(_build_cobol_file(file_path))
+        except PermissionError:
+            # Some files in a repo may not be readable (e.g., chmod 000 in tests).
+            # Log a warning and continue rather than aborting the entire scan.
+            logger.warning("Permission denied reading %s — skipping", file_path)
+            continue
 
     # Sort by absolute path string for deterministic output.
     # Without sorting, the order depends on the filesystem, which varies
@@ -113,9 +119,14 @@ def _build_cobol_file(file_path: Path) -> COBOLFile:
     """
     Read a file and build a COBOLFile metadata object.
 
-    Reads the file twice: once to get byte size (fast, OS-level stat),
-    and once to count lines. For files up to ~10MB this is fast enough.
-    Larger files are still handled correctly but may take slightly longer.
+    Uses an OS-level stat() call to get the byte size (no file read needed),
+    then reads the file once to count lines. For files up to ~10MB this is
+    fast enough. Larger files are still handled correctly but may take longer.
+
+    Note on line_count: we count b"\\n" bytes, which matches the behavior of
+    `wc -l`. A file with no trailing newline will report one fewer line than
+    the number of visible text lines. This is intentional and consistent with
+    standard Unix tooling behavior.
 
     Args:
         file_path: Absolute path to an existing COBOL source file.

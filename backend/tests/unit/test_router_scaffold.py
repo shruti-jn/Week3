@@ -15,9 +15,7 @@ No real API calls are made — all external services are mocked.
 """
 
 import pytest
-from fastapi import FastAPI
 from httpx import ASGITransport, AsyncClient
-
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Health check
@@ -80,7 +78,7 @@ async def test_query_stub_missing_query_rejected(test_client: AsyncClient) -> No
 
 @pytest.mark.asyncio
 async def test_query_stub_top_k_out_of_range_rejected(test_client: AsyncClient) -> None:
-    """Query endpoint rejects top_k values outside 1–20 range."""
+    """Query endpoint rejects top_k values outside 1-20 range."""
     response_low = await test_client.post(
         "/api/v1/query",
         json={"query": "test", "top_k": 0},
@@ -157,7 +155,9 @@ async def test_dependencies_stub_valid_input(test_client: AsyncClient) -> None:
 
 
 @pytest.mark.asyncio
-async def test_dependencies_stub_missing_field_rejected(test_client: AsyncClient) -> None:
+async def test_dependencies_stub_missing_field_rejected(
+    test_client: AsyncClient,
+) -> None:
     """Dependencies endpoint rejects request missing paragraph_name."""
     response = await test_client.post(
         "/api/v1/dependencies",
@@ -186,7 +186,9 @@ async def test_business_logic_stub_valid_input(test_client: AsyncClient) -> None
 
 
 @pytest.mark.asyncio
-async def test_business_logic_stub_missing_file_rejected(test_client: AsyncClient) -> None:
+async def test_business_logic_stub_missing_file_rejected(
+    test_client: AsyncClient,
+) -> None:
     """Business logic endpoint rejects empty request body."""
     response = await test_client.post("/api/v1/business-logic", json={})
     assert response.status_code == 422
@@ -280,5 +282,121 @@ async def test_health_endpoint_does_not_require_auth() -> None:
         base_url="http://test",
     ) as client:
         response = await client.get("/health")
+
+    assert response.status_code == 200
+
+
+@pytest.mark.asyncio
+async def test_query_with_valid_bearer_token_succeeds() -> None:
+    """
+    A valid HS256 JWT signed with NEXTAUTH_SECRET is accepted by get_current_user.
+
+    This exercises the get_current_user dependency body (lines that were
+    previously uncovered because test_client overrides the dependency).
+    The token is created with the same secret the backend uses to verify.
+    """
+    import os
+    import time as time_module
+
+    from jose import jwt as jose_jwt
+
+    secret = "test-nextauth-secret-32chars-long!!"
+    os.environ["NEXTAUTH_SECRET"] = secret
+    os.environ.setdefault("OPENAI_API_KEY", "sk-test-fake")
+    os.environ.setdefault("PINECONE_API_KEY", "pctest-fake")
+    os.environ.setdefault("GITHUB_CLIENT_ID", "test-id")
+    os.environ.setdefault("GITHUB_CLIENT_SECRET", "test-secret")
+
+    # Create a valid JWT signed with the same secret the backend uses
+    token = jose_jwt.encode(
+        {"sub": "github-99999", "exp": int(time_module.time()) + 3600},
+        secret,
+        algorithm="HS256",
+    )
+
+    from app.config import get_settings
+    from app.main import create_app
+
+    get_settings.cache_clear()
+    app = create_app()
+
+    async with AsyncClient(
+        transport=ASGITransport(app=app),
+        base_url="http://test",
+    ) as client:
+        response = await client.post(
+            "/api/v1/query",
+            json={"query": "test query"},
+            headers={"Authorization": f"Bearer {token}"},
+        )
+
+    # Stub endpoint returns 200 for authenticated requests
+    assert response.status_code == 200
+
+
+@pytest.mark.asyncio
+async def test_docs_disabled_in_production() -> None:
+    """
+    /docs returns 404 when ENVIRONMENT=production.
+
+    Interactive API docs expose the full endpoint schema, which is useful
+    in development but reduces the attack surface in production.
+    """
+    import os
+    os.environ["ENVIRONMENT"] = "production"
+    os.environ.setdefault("OPENAI_API_KEY", "sk-test-fake")
+    os.environ.setdefault("PINECONE_API_KEY", "pctest-fake")
+    os.environ.setdefault("GITHUB_CLIENT_ID", "test-id")
+    os.environ.setdefault("GITHUB_CLIENT_SECRET", "test-secret")
+    os.environ.setdefault("NEXTAUTH_SECRET", "test-nextauth-secret-32chars-long!!")
+
+    from app.config import get_settings
+    from app.main import create_app
+
+    get_settings.cache_clear()
+    try:
+        app = create_app()
+
+        async with AsyncClient(
+            transport=ASGITransport(app=app),
+            base_url="http://test",
+        ) as client:
+            docs_response = await client.get("/docs")
+            redoc_response = await client.get("/redoc")
+
+        assert docs_response.status_code == 404
+        assert redoc_response.status_code == 404
+    finally:
+        # Restore to development so other tests aren't affected
+        os.environ.pop("ENVIRONMENT", None)
+        get_settings.cache_clear()
+
+
+@pytest.mark.asyncio
+async def test_docs_enabled_in_development() -> None:
+    """
+    /docs returns 200 when ENVIRONMENT=development (the default).
+
+    Developers need interactive API docs during local development and CI.
+    """
+    import os
+    os.environ.pop("ENVIRONMENT", None)  # Ensure default (development)
+    os.environ.setdefault("OPENAI_API_KEY", "sk-test-fake")
+    os.environ.setdefault("PINECONE_API_KEY", "pctest-fake")
+    os.environ.setdefault("GITHUB_CLIENT_ID", "test-id")
+    os.environ.setdefault("GITHUB_CLIENT_SECRET", "test-secret")
+    os.environ.setdefault("NEXTAUTH_SECRET", "test-nextauth-secret-32chars-long!!")
+
+    from app.config import get_settings
+    from app.main import create_app
+
+    get_settings.cache_clear()
+    app = create_app()
+
+    async with AsyncClient(
+        transport=ASGITransport(app=app),
+        base_url="http://test",
+    ) as client:
+        response = await client.get("/docs")
 
     assert response.status_code == 200

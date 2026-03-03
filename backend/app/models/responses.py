@@ -17,7 +17,6 @@ from typing import Optional
 
 from pydantic import BaseModel, Field
 
-
 # ─────────────────────────────────────────────────────────────────────────────
 # Shared sub-models
 # ─────────────────────────────────────────────────────────────────────────────
@@ -58,7 +57,7 @@ class CodeSnippet(BaseModel):
         ...,
         ge=0.0,
         le=1.0,
-        description="Cosine similarity score from Pinecone (0.0–1.0).",
+        description="Cosine similarity score from Pinecone (0.0-1.0).",
     )
 
     def model_post_init(self, __context: object) -> None:
@@ -70,7 +69,9 @@ class CodeSnippet(BaseModel):
         letting it silently produce nonsense output.
         """
         if self.end_line < self.start_line:
-            msg = f"end_line ({self.end_line}) must be >= start_line ({self.start_line})."
+            msg = (
+                f"end_line ({self.end_line}) must be >= start_line ({self.start_line})."
+            )
             raise ValueError(msg)
 
 
@@ -145,10 +146,10 @@ class ExplainResponse(BaseModel):
     summary of what the COBOL paragraph does. During Phase 1 it is None.
     """
 
-    status: str
-    message: str
-    paragraph_name: str
-    explanation: Optional[str] = None
+    status: str = Field(..., min_length=1, description="Response status.")
+    message: str = Field(..., min_length=1, description="Human-readable status detail.")
+    paragraph_name: str = Field(..., min_length=1, description="COBOL paragraph label.")
+    explanation: Optional[str] = None  # noqa: UP045 -- str | None fails Pydantic on Python 3.9
 
 
 class DependenciesResponse(BaseModel):
@@ -159,9 +160,9 @@ class DependenciesResponse(BaseModel):
     and 'called_by' lists paragraphs that PERFORM this one.
     """
 
-    status: str
-    message: str
-    paragraph_name: str
+    status: str = Field(..., min_length=1, description="Response status.")
+    message: str = Field(..., min_length=1, description="Human-readable status detail.")
+    paragraph_name: str = Field(..., min_length=1, description="COBOL paragraph label.")
     calls: list[str] = Field(default_factory=list)
     called_by: list[str] = Field(default_factory=list)
 
@@ -174,9 +175,11 @@ class BusinessLogicResponse(BaseModel):
     extracted from the COBOL file (e.g., "Overtime applies after 40 hours").
     """
 
-    status: str
-    message: str
-    file_path: str
+    status: str = Field(..., min_length=1, description="Response status.")
+    message: str = Field(..., min_length=1, description="Human-readable status detail.")
+    file_path: str = Field(
+        ..., min_length=1, description="Path to the COBOL source file."
+    )
     rules: list[str] = Field(default_factory=list)
 
 
@@ -188,7 +191,7 @@ class ImpactResponse(BaseModel):
     would be impacted if the specified paragraph were changed.
     """
 
-    status: str
-    message: str
-    paragraph_name: str
+    status: str = Field(..., min_length=1, description="Response status.")
+    message: str = Field(..., min_length=1, description="Human-readable status detail.")
+    paragraph_name: str = Field(..., min_length=1, description="COBOL paragraph label.")
     affected_paragraphs: list[str] = Field(default_factory=list)

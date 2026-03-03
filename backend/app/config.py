@@ -47,7 +47,9 @@ class Settings(BaseSettings):
     # The frontend signs tokens with nextauth_secret; the backend verifies them
     github_client_id: str = Field(description="GitHub OAuth App client ID")
     github_client_secret: str = Field(description="GitHub OAuth App client secret")
-    nextauth_secret: str = Field(description="NextAuth.js secret — used to sign JWT tokens")
+    nextauth_secret: str = Field(
+        description="NextAuth.js secret — used to sign JWT tokens"
+    )
 
     # ── CORS ──────────────────────────────────────────────────────────────
     # Restricts which domains can call our API.
@@ -66,6 +68,14 @@ class Settings(BaseSettings):
         description="Max requests per user per minute (default: 20)",
     )
 
+    # ── Deployment Environment ────────────────────────────────────────────
+    # Controls environment-specific behavior (e.g., disabling /docs in production).
+    # Set ENVIRONMENT=production on Railway to harden the deployed service.
+    environment: str = Field(
+        default="development",
+        description='Runtime environment: "development" or "production"',
+    )
+
     # ── Retrieval Tuning ──────────────────────────────────────────────────
     # These control how the RAG pipeline behaves.
     # Higher top_k = more candidates to rerank = slightly slower but better results
@@ -74,7 +84,7 @@ class Settings(BaseSettings):
         description="Number of chunks to retrieve from Pinecone before reranking",
     )
     # Minimum similarity score to consider a chunk "relevant enough" to answer from.
-    # Below this threshold, we return a safe fallback instead of a potentially wrong answer.
+    # Below this threshold, we return a fallback — no answer beats a wrong one.
     similarity_threshold: float = Field(
         default=0.75,
         description="Minimum Pinecone similarity score to use a chunk (0.0 to 1.0)",

@@ -21,10 +21,18 @@ Pipeline position:
 import asyncio
 import functools
 import logging
+import time
 from dataclasses import dataclass, field
 from typing import Any
 
 logger = logging.getLogger(__name__)
+
+# Retry configuration for transient Pinecone failures (rate limits, 503s).
+# We try up to 3 times with exponential backoff: 1s, 2s, 4s.
+# time.sleep() is used (not asyncio.sleep) because we're inside an executor
+# thread — the event loop is not accessible from there.
+_MAX_RETRIES = 3
+_RETRY_BASE_DELAY_S = 1.0
 
 
 @dataclass
@@ -76,7 +84,8 @@ class PineconeWrapper:
     1. Testability: we can inject a mock client for unit tests
     2. Batching: Pinecone has a max of 100 vectors per upsert call
     3. Filtering: query() applies score threshold filtering that the SDK doesn't do
-    4. Logging: every operation is logged with structured context
+    4. Retry: transient failures (429 rate limit, 503) are retried automatically
+    5. Logging: every operation is logged with structured context
 
     Usage:
         from app.dependencies import get_pinecone_client
@@ -114,9 +123,11 @@ class PineconeWrapper:
         Pinecone has a hard limit of 100 vectors per API call. This method
         automatically splits larger lists into batches and calls upsert
         once per batch. Batches are processed sequentially to avoid rate limits.
+        Each batch is retried up to _MAX_RETRIES times on transient failures.
 
         Think of it like moving books to a library shelf — you carry 100 at a
-        time because that's what fits on the cart.
+        time because that's what fits on the cart. If the librarian is busy,
+        you wait a moment and try again before giving up.
 
         Args:
             vectors:    List of ChunkVector objects to store. Can be empty.
@@ -125,6 +136,9 @@ class PineconeWrapper:
 
         Returns:
             Total number of vectors successfully upserted. 0 if list is empty.
+
+        Raises:
+            RuntimeError: If a batch fails after all retry attempts are exhausted.
 
         Example:
             chunks = [ChunkVector(id="f.cob::PARA", embedding=[...], metadata={...})]
@@ -148,14 +162,7 @@ class PineconeWrapper:
                 for v in batch
             ]
 
-            # Run the synchronous Pinecone SDK call in an executor so it
-            # doesn't block the async event loop.
-            # functools.partial binds pinecone_records at call time, satisfying
-            # B023 (no closure over a loop variable) and letting mypy infer types.
-            await asyncio.get_event_loop().run_in_executor(
-                None,
-                functools.partial(self._index.upsert, vectors=pinecone_records),
-            )
+            await self._upsert_with_retry(pinecone_records, batch_start)
 
             total_upserted += len(batch)
             logger.debug(
@@ -173,6 +180,56 @@ class PineconeWrapper:
         )
         return total_upserted
 
+    async def _upsert_with_retry(
+        self,
+        pinecone_records: list[dict[str, Any]],
+        batch_start: int,
+    ) -> None:
+        """
+        Call Pinecone upsert with exponential backoff retry on transient errors.
+
+        Runs the synchronous Pinecone SDK call in a thread-pool executor
+        so it doesn't block the async event loop. Uses time.sleep() (not
+        asyncio.sleep) because we're inside the executor thread context.
+
+        Args:
+            pinecone_records: List of Pinecone-formatted dicts to upsert.
+            batch_start:      Starting index of this batch (for log messages).
+
+        Raises:
+            RuntimeError: After _MAX_RETRIES failed attempts.
+        """
+        loop = asyncio.get_running_loop()
+        last_exc: Exception | None = None
+
+        for attempt in range(_MAX_RETRIES):
+            try:
+                await loop.run_in_executor(
+                    None,
+                    functools.partial(self._index.upsert, vectors=pinecone_records),
+                )
+                return
+            except Exception as exc:  # BLE001 not enabled in this project's ruff config
+                last_exc = exc
+                delay = _RETRY_BASE_DELAY_S * (2**attempt)
+                logger.warning(
+                    "Pinecone upsert attempt %d/%d failed for batch starting at %d "
+                    "(error: %s). Retrying in %.1fs...",
+                    attempt + 1,
+                    _MAX_RETRIES,
+                    batch_start,
+                    exc,
+                    delay,
+                )
+                # time.sleep (not asyncio.sleep) — we're inside a thread executor
+                time.sleep(delay)
+
+        msg = (
+            f"Pinecone upsert failed after {_MAX_RETRIES} attempts "
+            f"for batch starting at index {batch_start}: {last_exc}"
+        )
+        raise RuntimeError(msg)
+
     async def query(
         self,
         embedding: list[float],
@@ -185,6 +242,7 @@ class PineconeWrapper:
         Calls Pinecone's vector similarity search, then filters out any
         results below the min_score threshold (our confidence cutoff).
         Results are returned sorted by score descending (most relevant first).
+        The Pinecone call is retried up to _MAX_RETRIES times on transient errors.
 
         Think of it like a Google search — you get back the top matches,
         but we discard any that aren't relevant enough to be trustworthy.
@@ -201,6 +259,9 @@ class PineconeWrapper:
             List of SearchResult objects sorted by score descending.
             Empty list if no results meet the min_score threshold.
 
+        Raises:
+            RuntimeError: If the Pinecone query fails after all retry attempts.
+
         Example:
             query_vec = [0.1] * 1536  # from OpenAI embeddings API
             results = await wrapper.query(query_vec, top_k=5, min_score=0.75)
@@ -216,15 +277,8 @@ class PineconeWrapper:
             min_score,
         )
 
-        # Run the synchronous Pinecone SDK call in an executor
-        response = await asyncio.get_event_loop().run_in_executor(
-            None,
-            lambda: self._index.query(
-                vector=embedding,
-                top_k=top_k,
-                include_metadata=True,
-            ),
-        )
+        # Run the synchronous Pinecone SDK call in an executor, with retry
+        response = await self._query_with_retry(embedding, top_k)
 
         # Convert Pinecone response objects to our SearchResult dataclass
         # and filter out matches below the score threshold
@@ -258,3 +312,57 @@ class PineconeWrapper:
             len(response.matches),
         )
         return results
+
+    async def _query_with_retry(
+        self,
+        embedding: list[float],
+        top_k: int,
+    ) -> Any:  # noqa: ANN401 -- Pinecone response type lacks stubs
+        """
+        Call Pinecone query with exponential backoff retry on transient errors.
+
+        Runs the synchronous Pinecone SDK call in a thread-pool executor
+        so it doesn't block the async event loop. Uses time.sleep() (not
+        asyncio.sleep) because we're inside the executor thread context.
+
+        Args:
+            embedding: The query vector (1536 floats).
+            top_k:     Number of nearest neighbors to return.
+
+        Returns:
+            Raw Pinecone query response object (has a .matches attribute).
+
+        Raises:
+            RuntimeError: After _MAX_RETRIES failed attempts.
+        """
+        loop = asyncio.get_running_loop()
+        last_exc: Exception | None = None
+
+        for attempt in range(_MAX_RETRIES):
+            try:
+                return await loop.run_in_executor(
+                    None,
+                    functools.partial(
+                        self._index.query,
+                        vector=embedding,
+                        top_k=top_k,
+                        include_metadata=True,
+                    ),
+                )
+            except Exception as exc:  # BLE001 not enabled in this project's ruff config
+                last_exc = exc
+                delay = _RETRY_BASE_DELAY_S * (2**attempt)
+                logger.warning(
+                    "Pinecone query attempt %d/%d failed (error: %s). "
+                    "Retrying in %.1fs...",
+                    attempt + 1,
+                    _MAX_RETRIES,
+                    exc,
+                    delay,
+                )
+                time.sleep(delay)
+
+        msg = (
+            f"Pinecone query failed after {_MAX_RETRIES} attempts: {last_exc}"
+        )
+        raise RuntimeError(msg)

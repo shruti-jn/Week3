@@ -120,18 +120,27 @@ Hour 22–24 [frontend-results-display] → [deployment] → 🚀 MVP LIVE
 
 ---
 
-## How to Start Any Branch (the 6-step ritual)
+## How to Start Any Branch (the 8-step ritual)
 
 ```
-1.  git checkout dev && git pull
+1.  git checkout dev && git pull origin dev
 2.  git checkout -b feature/<name>
 3.  Tell Claude: "Plan feature/<name>"     ← get written plan approved FIRST
-4.  Write failing tests                    ← TDD: test before code
-5.  Write implementation to pass tests
-6.  Open PR → CI must be green → squash merge to dev
+4.  Write failing tests ONLY               ← STOP. Show the test file and wait.
+    → Wait for explicit approval: "Tests look good, proceed with implementation"
+5.  Write implementation to pass the tests
+6.  Run locally: cd backend && backend/.venv/bin/pytest -m "not integration" tests/unit/ -v
+                 bash scripts/check_coverage.sh
+7.  Open PR (DO NOT merge it)              ← Show the PR diff. Wait for approval.
+8.  After explicit approval: squash merge to dev
 ```
 
+**MANDATORY STOP POINTS (agents must never skip these):**
+- After step 4: share the test file content and wait for a "proceed" before writing code
+- After step 7: share the PR link and wait for approval before merging
+
 Never skip step 3. The plan takes 5 minutes. Skipping it costs hours.
+An agent that merges without approval wastes more time than it saves.
 
 ---
 

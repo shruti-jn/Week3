@@ -16,6 +16,40 @@ the exact code snippet, file name, and line number — like a search engine for 
 
 ---
 
+## Python Runtime — Always Use Python 3.12
+
+**Never use the system Python (3.9 on macOS) for this project.**
+
+macOS ships with Python 3.9 at `/usr/bin/python3` or `/Library/Developer/CommandLineTools/usr/bin/python3`.
+This project requires Python 3.12 (type union syntax `str | None`, match statements, etc.).
+Using 3.9 causes `TypeError: unsupported operand type(s) for |: 'type' and 'NoneType'`.
+
+**The correct Python is at: `/Users/shruti/.local/bin/python3.12`**
+
+The virtual environment lives at `backend/.venv/` and was created with Python 3.12.
+Always run commands using it:
+
+```bash
+# Run tests
+backend/.venv/bin/pytest -m "not integration" tests/unit/ -v
+
+# Run coverage check
+backend/.venv/bin/pytest -m "not integration" tests/unit/ --cov=app
+bash backend/scripts/check_coverage.sh
+
+# Run linting
+backend/.venv/bin/ruff check backend/app/
+backend/.venv/bin/mypy backend/app/ --strict
+```
+
+If the venv doesn't exist yet (fresh clone):
+```bash
+/Users/shruti/.local/bin/python3.12 -m venv backend/.venv
+backend/.venv/bin/pip install -e "backend/.[dev]"
+```
+
+---
+
 ## Code Quality — Non-Negotiable
 
 All Python code must pass before committing:

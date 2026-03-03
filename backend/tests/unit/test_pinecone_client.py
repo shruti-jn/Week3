@@ -12,13 +12,15 @@ Think of these tests as verifying the "plumbing" that connects our
 application logic to the Pinecone vector database.
 """
 
-from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import pytest
 
-from app.core.retrieval.pinecone_client import ChunkVector, PineconeWrapper, SearchResult
-
+from app.core.retrieval.pinecone_client import (
+    ChunkVector,
+    PineconeWrapper,
+    SearchResult,
+)
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Fixtures
@@ -169,9 +171,9 @@ async def test_upsert_batch_respects_batch_size(
     upsert_batch splits large input into batches of the specified size.
 
     If we have 250 vectors and batch_size=100, we expect 3 upsert calls:
-    - Call 1: vectors 0–99 (100 items)
-    - Call 2: vectors 100–199 (100 items)
-    - Call 3: vectors 200–249 (50 items)
+    - Call 1: vectors 0-99 (100 items)
+    - Call 2: vectors 100-199 (100 items)
+    - Call 3: vectors 200-249 (50 items)
     """
     wrapper = PineconeWrapper(client=mock_pinecone_client, index_name="test")
     vectors = [
@@ -301,7 +303,9 @@ async def test_query_passes_top_k_to_pinecone(
     # Override the mock query to capture arguments
     captured_args: dict[str, object] = {}
 
-    def capture_query(vector: list[float], top_k: int = 10, **kwargs: object) -> MagicMock:
+    def capture_query(
+        vector: list[float], top_k: int = 10, **kwargs: object
+    ) -> MagicMock:
         captured_args["top_k"] = top_k
         response = MagicMock()
         response.matches = []
@@ -364,3 +368,121 @@ async def test_query_min_score_boundary(
         min_score=0.81,
     )
     assert len(results) == 2
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Retry logic tests
+# These verify that transient Pinecone failures are retried automatically
+# rather than propagating immediately to the caller.
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+@pytest.mark.asyncio
+async def test_upsert_succeeds_after_transient_failure(
+    mock_pinecone_client: MagicMock,
+    sample_vectors: list[ChunkVector],
+) -> None:
+    """
+    upsert_batch retries on a single transient error and eventually succeeds.
+
+    Simulates a 429 rate-limit on the first call, then success on the second.
+    time.sleep is patched so the test runs instantly with no real delay.
+    """
+    index_mock = mock_pinecone_client.Index.return_value
+    # Fail once, then succeed
+    index_mock.upsert = MagicMock(
+        side_effect=[RuntimeError("429 Rate Limit"), None]
+    )
+
+    wrapper = PineconeWrapper(client=mock_pinecone_client, index_name="test")
+
+    with patch("app.core.retrieval.pinecone_client.time.sleep"):
+        count = await wrapper.upsert_batch(sample_vectors[:1])
+
+    assert count == 1
+    assert index_mock.upsert.call_count == 2  # 1 failure + 1 success
+
+
+@pytest.mark.asyncio
+async def test_upsert_raises_after_all_retries_exhausted(
+    mock_pinecone_client: MagicMock,
+    sample_vectors: list[ChunkVector],
+) -> None:
+    """
+    upsert_batch raises RuntimeError after _MAX_RETRIES (3) failed attempts.
+
+    All 3 attempts fail — the wrapper should surface the error rather than
+    silently swallowing it or looping forever.
+    """
+    index_mock = mock_pinecone_client.Index.return_value
+    index_mock.upsert = MagicMock(side_effect=RuntimeError("503 Unavailable"))
+
+    wrapper = PineconeWrapper(client=mock_pinecone_client, index_name="test")
+
+    with patch("app.core.retrieval.pinecone_client.time.sleep"):
+        with pytest.raises(RuntimeError, match="Pinecone upsert failed"):
+            await wrapper.upsert_batch(sample_vectors[:1])
+
+    assert index_mock.upsert.call_count == 3  # Exactly _MAX_RETRIES attempts
+
+
+@pytest.mark.asyncio
+async def test_query_succeeds_after_transient_failure(
+    mock_pinecone_client: MagicMock,
+    sample_embedding: list[float],
+) -> None:
+    """
+    query() retries on a single transient error and eventually succeeds.
+
+    First call raises a transient exception; second call returns the
+    standard mock response. time.sleep is patched to avoid real delays.
+    """
+    index_mock = mock_pinecone_client.Index.return_value
+    original_query = index_mock.query
+
+    # Fail once, then succeed with original mock response
+    call_count = {"n": 0}
+
+    def flaky_query(**kwargs: object) -> MagicMock:
+        call_count["n"] += 1
+        if call_count["n"] == 1:
+            raise RuntimeError("429 Rate Limit")
+        # Delegate to the real mock on the second attempt
+        return original_query(**kwargs)
+
+    index_mock.query = flaky_query
+
+    wrapper = PineconeWrapper(client=mock_pinecone_client, index_name="test")
+
+    with patch("app.core.retrieval.pinecone_client.time.sleep"):
+        results = await wrapper.query(
+            embedding=sample_embedding, top_k=5, min_score=0.70
+        )
+
+    assert len(results) == 2  # Both mock results above 0.70
+    assert call_count["n"] == 2  # 1 failure + 1 success
+
+
+@pytest.mark.asyncio
+async def test_query_raises_after_all_retries_exhausted(
+    mock_pinecone_client: MagicMock,
+    sample_embedding: list[float],
+) -> None:
+    """
+    query() raises RuntimeError after _MAX_RETRIES (3) failed attempts.
+
+    All 3 attempts fail — the wrapper surfaces the error so the caller
+    can handle it (e.g., return a 503 to the user).
+    """
+    index_mock = mock_pinecone_client.Index.return_value
+    index_mock.query = MagicMock(side_effect=RuntimeError("503 Service Unavailable"))
+
+    wrapper = PineconeWrapper(client=mock_pinecone_client, index_name="test")
+
+    with patch("app.core.retrieval.pinecone_client.time.sleep"):
+        with pytest.raises(RuntimeError, match="Pinecone query failed"):
+            await wrapper.query(
+                embedding=sample_embedding, top_k=5, min_score=0.75
+            )
+
+    assert index_mock.query.call_count == 3  # Exactly _MAX_RETRIES attempts

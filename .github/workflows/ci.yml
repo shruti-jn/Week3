@@ -106,6 +106,14 @@ jobs:
       - name: Run unit tests with coverage
         run: pytest -m "not integration" tests/unit/ --cov=app --cov-fail-under=80 --cov-report=xml
 
+      # Per-file coverage enforcement.
+      # --cov-fail-under=80 only checks the AGGREGATE total — one bad file
+      # can be masked by many good files. This step checks each file in app/
+      # individually, so no file can hide below the 80% minimum.
+      # Think of it like checking every room in the house, not just the average.
+      - name: Check per-file coverage minimums
+        run: bash scripts/check_coverage.sh
+
       # Upload the coverage report to Codecov.
       # Codecov shows a visual breakdown of which lines are covered.
       # It also posts a coverage summary comment on the PR.
