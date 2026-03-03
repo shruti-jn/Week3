@@ -34,9 +34,12 @@ dockerfilePath = "Dockerfile"
 
 [deploy]
 # Start the server on the port Railway assigns at runtime.
-# $PORT is injected by Railway — never hardcode 8000 here.
+# Wrapped in sh -c so the shell expands $PORT before passing to uvicorn.
+# Without sh -c, Railway passes '$PORT' as a literal string (not a number),
+# which causes: Error: Invalid value for '--port': '$PORT' is not a valid integer.
+# ${PORT:-8000} falls back to 8000 for local docker-compose runs.
 # --host 0.0.0.0 binds to all interfaces (required in Docker).
-startCommand = "uvicorn app.main:app --host 0.0.0.0 --port $PORT"
+startCommand = "sh -c 'uvicorn app.main:app --host 0.0.0.0 --port ${PORT:-8000}'"
 
 # Railway calls this endpoint to verify the server is alive.
 # Must return HTTP 200 within healthcheckTimeout seconds after deploy,
