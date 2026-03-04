@@ -26,6 +26,7 @@ from httpx import ASGITransport, AsyncClient
 # This prevents pydantic-settings from failing when .env doesn't exist in CI.
 # These values are fake — the real services are always mocked in unit tests.
 os.environ.setdefault("OPENAI_API_KEY", "sk-test-fake-key-for-unit-tests")
+os.environ.setdefault("VOYAGE_API_KEY", "pk-live-test-fake-key-for-unit-tests")
 os.environ.setdefault("PINECONE_API_KEY", "pctest-fake-key-for-unit-tests")
 os.environ.setdefault("PINECONE_INDEX_NAME", "legacylens-test")
 os.environ.setdefault("GITHUB_CLIENT_ID", "test-github-client-id")
@@ -107,7 +108,44 @@ def sample_cobol_windows_line_endings() -> str:
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# OpenAI Mock
+# Voyage AI Mock (embeddings)
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+@pytest.fixture
+def mock_voyage_client() -> MagicMock:
+    """
+    A fake Voyage AI client that returns realistic-looking embeddings without
+    actually making any network calls or spending any money.
+
+    voyage-code-2 produces 1024-dimensional vectors. This mock returns
+    1024-float vectors of value 0.1 to simulate a real embedding.
+
+    voyageai.Client is synchronous — embedder.py wraps it in asyncio.to_thread()
+    so MagicMock (not AsyncMock) is the correct type here.
+
+    Usage in tests:
+        def test_something(mock_voyage_client):
+            result = await embed_query("find interest calculation", mock_voyage_client)
+            assert len(result) == 1024
+    """
+    client = MagicMock()
+
+    def embed_side_effect(
+        texts: list[str],
+        model: str,
+        input_type: str = "document",
+    ) -> MagicMock:
+        response = MagicMock()
+        response.embeddings = [[0.1] * 1024 for _ in texts]
+        return response
+
+    client.embed = MagicMock(side_effect=embed_side_effect)
+    return client
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# OpenAI Mock (answer generation only — embeddings moved to Voyage)
 # ─────────────────────────────────────────────────────────────────────────────
 
 
@@ -117,9 +155,8 @@ def mock_openai_client() -> AsyncMock:
     A fake OpenAI client that returns realistic-looking data without
     actually making any network calls or spending any money.
 
-    This mock simulates two OpenAI capabilities:
-    1. Embeddings: converts text into a list of 1536 numbers
-    2. Chat completions: generates an answer to a question
+    After switching embeddings to Voyage AI, this mock covers only:
+    1. Chat completions (gpt-4o-mini): generates an answer to a question
 
     Without this mock, unit tests would:
     - Require a real OpenAI API key
@@ -129,31 +166,30 @@ def mock_openai_client() -> AsyncMock:
 
     Usage in tests:
         def test_something(mock_openai_client):
-            result = await embed_query("find interest calculation", mock_openai_client)
-            assert len(result) == 1536
+            tokens = [t async for t in generate_answer(q, snippets, mock_openai_client)]
+            assert len(tokens) > 0
     """
     client = AsyncMock()
 
-    # Mock the embeddings endpoint
-    # Normally returns: response.data[0].embedding = [0.12, -0.34, ...]
-    # We return a list of 1536 zeros to simulate a real embedding vector
-    mock_embedding_response = MagicMock()
-    mock_embedding_response.data = [MagicMock(embedding=[0.1] * 1536)]
-    client.embeddings.create = AsyncMock(return_value=mock_embedding_response)
+    # Mock chat.completions.create(stream=True) — the method generate_answer() calls.
+    # The answer_generator awaits create() then iterates the result with `async for`.
+    # _FakeStream provides a proper async iterator so `async for chunk in stream` works.
+    class _FakeStream:
+        """Fake async-iterable streaming response — yields one chunk per word."""
 
-    # Mock the chat completions endpoint (streaming)
-    # Simulates GPT-4o-mini returning "This is a mocked answer." word by word
-    async def mock_stream() -> AsyncGenerator[MagicMock, None]:
-        words = ["This", " is", " a", " mocked", " answer", "."]
-        for word in words:
-            chunk = MagicMock()
-            chunk.choices = [MagicMock()]
-            chunk.choices[0].delta.content = word
-            yield chunk
+        def __aiter__(self) -> AsyncGenerator[MagicMock, None]:
+            return self._gen()
 
-    mock_stream_context = MagicMock()
-    mock_stream_context.__aiter__ = mock_stream
-    client.chat.completions.stream = MagicMock(return_value=mock_stream_context)
+        async def _gen(self) -> AsyncGenerator[MagicMock, None]:
+            words = ["This", " is", " a", " mocked", " answer", "."]
+            for word in words:
+                chunk = MagicMock()
+                chunk.choices = [MagicMock()]
+                chunk.choices[0].delta.content = word
+                yield chunk
+
+    # create() is async — AsyncMock.return_value is what `await create(...)` returns.
+    client.chat.completions.create = AsyncMock(return_value=_FakeStream())
 
     return client
 
@@ -252,6 +288,7 @@ def mock_pinecone_empty() -> MagicMock:
 @pytest.fixture
 async def test_client(
     mock_openai_client: AsyncMock,
+    mock_voyage_client: MagicMock,
     mock_pinecone_client: MagicMock,
 ) -> AsyncGenerator[AsyncClient, None]:
     """
@@ -261,8 +298,9 @@ async def test_client(
     without starting a real server. It's much faster than running
     a real server and doesn't require a network connection.
 
-    The mock_openai_client and mock_pinecone_client fixtures are
-    automatically injected so the API uses fake services, not real ones.
+    The mock_openai_client (chat), mock_voyage_client (embeddings), and
+    mock_pinecone_client fixtures are automatically injected so the API
+    uses fake services, not real ones.
 
     Usage in tests:
         async def test_query_endpoint(test_client):
@@ -271,7 +309,7 @@ async def test_client(
     """
     # We import here (not at top level) to avoid circular imports during testing
     from app.config import get_settings
-    from app.dependencies import get_openai_client, get_pinecone_client
+    from app.dependencies import get_openai_client, get_pinecone_client, get_voyage_client
     from app.main import create_app
 
     # Clear the lru_cache so pydantic-settings re-reads the env vars set above
@@ -281,9 +319,12 @@ async def test_client(
 
     from app.api.v1.dependencies import get_current_user
 
-    # Override the real dependency functions with our mocks
-    # This is FastAPI's built-in "dependency override" feature
+    # Override the real dependency functions with our mocks.
+    # This is FastAPI's built-in "dependency override" feature.
+    # Note: the /query router creates clients inline (not via Depends) so
+    # these overrides apply to endpoints that use Depends(get_*_client).
     app.dependency_overrides[get_openai_client] = lambda: mock_openai_client
+    app.dependency_overrides[get_voyage_client] = lambda: mock_voyage_client
     app.dependency_overrides[get_pinecone_client] = lambda: mock_pinecone_client
     # Override auth so tests don't need real JWTs — the router tests focus
     # on request/response shapes, not auth. Auth is tested separately in test_jwt_validator.py.

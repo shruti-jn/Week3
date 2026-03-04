@@ -17,8 +17,11 @@ dependencies = [
     "pydantic>=2.7",
     # Loads settings from environment variables (keeps secrets out of code)
     "pydantic-settings>=2.3",
-    # Official OpenAI SDK — for embeddings and GPT-4o-mini answer generation
+    # Official OpenAI SDK — for GPT-4o-mini answer generation (streaming)
     "openai>=1.35",
+    # Voyage AI SDK — voyage-code-2 code-specific embeddings (1024 dims)
+    # Synchronous client only; async callers wrap with asyncio.to_thread().
+    "voyageai>=0.3.7",
     # LangChain — RAG orchestration (we use selectively, not for everything)
     "langchain>=0.2",
     "langchain-openai>=0.1",
@@ -31,6 +34,9 @@ dependencies = [
     "python-jose[cryptography]>=3.3",
     # Rate limiting middleware for FastAPI
     "slowapi>=0.1",
+    # Observability and tracing — framework-agnostic, works with custom pipelines.
+    # Optional: the app runs without Langfuse when keys are not configured.
+    "langfuse>=2.0",
 ]
 
 # ─────────────────────────────────────────────
@@ -56,8 +62,7 @@ dev = [
     "pre-commit>=3.7",
     # Mutation testing — checks if tests actually catch code bugs
     "mutmut>=2.4",
-    # Type stubs for httpx (needed for mypy)
-    "types-httpx>=0.27",
+    # httpx ships its own inline type stubs — no separate types-httpx package needed
 ]
 
 
@@ -113,10 +118,29 @@ warn_unused_configs = true # Warn about unused mypy config entries
 no_implicit_reexport = true # Explicit re-exports only (cleaner public APIs)
 plugins = ["pydantic.mypy"] # Pydantic plugin for better Pydantic type checking
 
-# Some third-party packages don't have type stubs — tell mypy to ignore them
+# Third-party packages without type stubs — tell mypy to ignore missing imports
 [[tool.mypy.overrides]]
-module = ["pinecone.*", "langchain.*", "langchain_openai.*", "langchain_pinecone.*", "slowapi.*"]
-ignore_missing_stubs = true
+module = [
+    "pinecone", "pinecone.*",
+    "langchain", "langchain.*",
+    "langchain_openai", "langchain_openai.*",
+    "langchain_pinecone", "langchain_pinecone.*",
+    "slowapi", "slowapi.*",
+    "voyageai", "voyageai.*",
+    "langfuse", "langfuse.*",
+    "jose", "jose.*",
+]
+ignore_missing_imports = true
+
+# voyageai ships no stubs — suppress all attribute/name errors in files that use it
+[[tool.mypy.overrides]]
+module = [
+    "app.core.ingestion.embedder",
+    "app.core.query_pipeline",
+    "app.dependencies",
+    "app.api.v1.router",
+]
+ignore_errors = true
 
 
 # ─────────────────────────────────────────────

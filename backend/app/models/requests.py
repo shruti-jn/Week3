@@ -36,7 +36,7 @@ class QueryRequest(BaseModel):
         default=5,
         ge=1,
         le=20,
-        description="Number of code chunks to retrieve from Pinecone (1–20).",
+        description="Number of code chunks to retrieve from Pinecone (1-20).",
     )
 
     @field_validator("query")

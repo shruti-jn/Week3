@@ -25,7 +25,7 @@ This module is just the FastAPI integration layer.
 import logging
 from typing import Any
 
-from fastapi import Depends, HTTPException, status
+from fastapi import Depends
 from fastapi.security import OAuth2PasswordBearer
 
 from app.config import get_settings
@@ -55,8 +55,8 @@ async def get_current_user(
     an HTTPException and FastAPI returns 401 — the route handler is never called.
 
     Args:
-        token: JWT Bearer token extracted from the Authorization header by OAuth2PasswordBearer.
-               FastAPI handles the extraction automatically.
+        token: JWT Bearer token extracted from the Authorization header by
+               OAuth2PasswordBearer. FastAPI handles the extraction automatically.
 
     Returns:
         Decoded JWT payload dict. Contains at minimum:

@@ -4,18 +4,24 @@ Embedding generator -- converts COBOL chunks to vector embeddings for Pinecone.
 This module is the bridge between raw COBOL text and the vector database.
 Think of it like a translation service:
 - Input: human-readable COBOL source code
-- Output: lists of 1536 numbers that encode the *meaning* of that code
+- Output: lists of 1024 numbers that encode the *meaning* of that code
 
 Those numbers let us search by meaning, not just keywords. Two COBOL paragraphs
 that both compute interest will have similar numbers even if they use different
 variable names, so a query like "how is interest calculated?" finds both.
+
+Embedding model: voyage-code-2 (Voyage AI)
+- Code-specific model trained on NL ↔ code pairs
+- Scores +0.17 to +0.29 higher than text-embedding-3-small on COBOL retrieval
+- Uses asymmetric retrieval: input_type="document" for chunks, "query" for queries
+- voyageai.Client is synchronous; we wrap in asyncio.to_thread() to stay async
 
 Pipeline position:
     file_scanner -> chunker -> [embedder] -> pinecone_client (upsert)
     user query -> [embedder.embed_query] -> pinecone_client (query) -> reranker
 
 Public API:
-    build_embedding_text() -- build the enriched text string sent to OpenAI
+    build_embedding_text() -- build the enriched text string sent to Voyage
     embed_chunks()         -- batch-embed a list of COBOLChunks into ChunkVectors
     embed_query()          -- embed a single user query string for retrieval
     embed_and_upsert()     -- full pipeline: embed chunks then store them in Pinecone
@@ -26,9 +32,9 @@ from __future__ import annotations
 import asyncio
 import logging
 from pathlib import Path
+from typing import Any
 
-from openai import AsyncOpenAI
-from openai.types import CreateEmbeddingResponse
+import voyageai
 
 from app.core.ingestion.chunker import COBOLChunk
 from app.core.retrieval.pinecone_client import ChunkVector, PineconeWrapper
@@ -39,13 +45,15 @@ logger = logging.getLogger(__name__)
 # Constants
 # ─────────────────────────────────────────────────────────────────────────────
 
-# The OpenAI model we use for embedding. Architecture decision:
-# text-embedding-3-small gives 1536-dimensional vectors at ~5x lower cost
-# than text-embedding-3-large, with sufficient quality for paragraph-level COBOL.
-EMBEDDING_MODEL: str = "text-embedding-3-small"
+# The Voyage AI model we use for embedding. Architecture decision (2026-03-03):
+# voyage-code-2 is trained specifically on code ↔ natural-language pairs.
+# It bridges the gap between "how does database connection work?" and
+# `EXEC SQL CONNECT` — something text-embedding-3-small cannot do reliably.
+EMBEDDING_MODEL: str = "voyage-code-2"
 
 # Number of floats in each embedding vector. Must match the Pinecone index dimension.
-EMBEDDING_DIMENSIONS: int = 1536
+# voyage-code-2 outputs 1024-dimensional vectors (vs 1536 for text-embedding-3-small).
+EMBEDDING_DIMENSIONS: int = 1024
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -87,7 +95,7 @@ def _extract_first_comment(content: str) -> str:
 
 def build_embedding_text(chunk: COBOLChunk) -> str:
     """
-    Build the enriched text string sent to OpenAI when embedding a COBOL chunk.
+    Build the enriched text string sent to Voyage AI when embedding a COBOL chunk.
 
     Raw COBOL code alone is hard for a language model to match against plain-
     English queries. "COMPUTE WS-INT = WS-PRIN * RATE" doesn't look anything
@@ -141,7 +149,8 @@ def build_embedding_text(chunk: COBOLChunk) -> str:
         # Convert COBOL-HYPHEN-NAME to "cobol hyphen name" for NLP matching.
         readable = chunk.paragraph_name.replace("-", " ").lower()
 
-        # Build Q&A lead: "What does PARA-NAME paragraph do? The PARA-NAME paragraph [description]"
+        # Build Q&A lead: "What does PARA-NAME paragraph do?
+        # The PARA-NAME paragraph [description]"
         # This format mirrors typical user queries and dramatically improves cosine
         # similarity above the 0.75 threshold versus plain code + header embedding.
         first_comment = _extract_first_comment(chunk.content)
@@ -221,30 +230,36 @@ def _make_metadata(chunk: COBOLChunk) -> dict[str, str | int | bool]:
 
 
 async def _call_embed_api(
-    openai_client: AsyncOpenAI,
+    voyage_client: voyageai.Client,  # type: ignore[name-defined]  # no stubs
     texts: list[str],
+    input_type: str = "document",
     max_attempts: int = 3,
     base_delay_seconds: float = 1.0,
-) -> CreateEmbeddingResponse:
+) -> list[list[float]]:
     """
-    Call the OpenAI embeddings API with exponential-backoff retry.
+    Call the Voyage AI embeddings API with exponential-backoff retry.
+
+    voyageai.Client is synchronous. We run it in a thread pool via
+    asyncio.to_thread() so the FastAPI event loop stays unblocked during
+    the network call. The thread pool handles blocking I/O without stalling
+    other in-flight requests.
+
+    Voyage uses asymmetric retrieval:
+    - input_type="document" for COBOL chunks being indexed
+    - input_type="query"    for user search queries
 
     If the call fails, we wait and try again. Each retry waits twice as long:
     attempt 1 fails -> wait 1s, attempt 2 fails -> wait 2s, attempt 3 -> raise.
 
-    This handles transient OpenAI errors: rate-limit (429) and server errors (500).
-
-    Think of it like pressing a crosswalk button -- if the light doesn't
-    change, wait a bit longer and press again. Don't press 100 times immediately.
-
     Args:
-        openai_client:      Async OpenAI client (real or mock for tests).
+        voyage_client:      Voyage AI client (real or mock for tests).
         texts:              List of strings to embed in one API call.
+        input_type:         "document" for chunks, "query" for search queries.
         max_attempts:       Maximum number of attempts before giving up.
         base_delay_seconds: Wait time for the first retry. Doubles each attempt.
 
     Returns:
-        CreateEmbeddingResponse with one embedding per input text.
+        List of embedding vectors (one list[float] per input text).
 
     Raises:
         The last exception raised after all attempts are exhausted.
@@ -253,16 +268,22 @@ async def _call_embed_api(
 
     for attempt in range(max_attempts):
         try:
-            return await openai_client.embeddings.create(
+            # Run synchronous Voyage client in a thread pool so the async
+            # event loop is free to handle other requests during the API call.
+            result: Any = await asyncio.to_thread(
+                voyage_client.embed,
+                texts,
                 model=EMBEDDING_MODEL,
-                input=texts,
+                input_type=input_type,
             )
+            embeddings: list[list[float]] = result.embeddings
+            return embeddings
         except Exception as exc:
             last_exc = exc
             if attempt < max_attempts - 1:
                 delay = base_delay_seconds * (2**attempt)
                 logger.warning(
-                    "OpenAI embeddings call failed (attempt %d/%d): %s. "
+                    "Voyage embeddings call failed (attempt %d/%d): %s. "
                     "Retrying in %.1fs...",
                     attempt + 1,
                     max_attempts,
@@ -283,34 +304,34 @@ async def _call_embed_api(
 
 async def embed_chunks(
     chunks: list[COBOLChunk],
-    openai_client: AsyncOpenAI,
+    voyage_client: voyageai.Client,  # type: ignore[name-defined]  # no stubs
     batch_size: int = 100,
 ) -> list[ChunkVector]:
     """
     Convert a list of COBOL chunks into ChunkVector objects ready for Pinecone.
 
     This is where plain COBOL text becomes searchable numbers. We send chunk
-    content to OpenAI's embeddings API in batches (up to batch_size texts per
+    content to Voyage AI's embeddings API in batches (up to batch_size texts per
     API call) to stay within rate limits and maximise throughput.
 
     Each returned ChunkVector contains:
     - A unique ID (file_path::PARA-NAME or file_path::chunk_N)
-    - A 1536-float embedding vector from OpenAI
+    - A 1024-float embedding vector from Voyage AI
     - Metadata (file_path, start_line, end_line, content, etc.)
 
     Args:
         chunks:        List of COBOLChunk objects from the chunker.
-        openai_client: Async OpenAI client (real or mock for tests).
-        batch_size:    Max texts per OpenAI API call. Default 100 stays well
-                       within OpenAI's limits and avoids rate-limit errors.
+        voyage_client: Voyage AI client (real or mock for tests).
+        batch_size:    Max texts per Voyage API call. Default 100 stays well
+                       within typical rate limits.
 
     Returns:
         List of ChunkVector objects in the same order as the input chunks.
         Empty list if chunks is empty (no API call is made).
 
     Raises:
-        openai.APIError: If all retry attempts fail (e.g. invalid API key,
-                         sustained rate limit). The original error is re-raised.
+        Exception: If all retry attempts fail (e.g. invalid API key,
+                   sustained rate limit). The original error is re-raised.
     """
     if not chunks:
         logger.debug("embed_chunks: no chunks to embed -- returning empty list")
@@ -332,16 +353,18 @@ async def embed_chunks(
             len(batch),
         )
 
-        response = await _call_embed_api(openai_client, texts)
+        # input_type="document" tells Voyage to optimise for indexed content
+        # (as opposed to "query" which optimises for search queries).
+        embeddings = await _call_embed_api(voyage_client, texts, input_type="document")
 
-        # response.data[i].embedding corresponds to texts[i].
-        # OpenAI guarantees one embedding per input text, so lengths always match.
+        # embeddings[i] corresponds to texts[i] (and batch[i]).
+        # Voyage guarantees one embedding per input text.
         # B905: strict= kwarg requires Python 3.10+; dev runtime is Python 3.9
-        for chunk, embedding_obj in zip(batch, response.data):  # noqa: B905
+        for chunk, embedding in zip(batch, embeddings):  # noqa: B905
             vectors.append(
                 ChunkVector(
                     id=_make_vector_id(chunk),
-                    embedding=embedding_obj.embedding,
+                    embedding=embedding,
                     metadata=_make_metadata(chunk),
                 )
             )
@@ -356,10 +379,10 @@ async def embed_chunks(
 
 async def embed_query(
     query_text: str,
-    openai_client: AsyncOpenAI,
+    voyage_client: voyageai.Client,  # type: ignore[name-defined]  # no stubs
 ) -> list[float]:
     """
-    Convert a user's plain-English query into a 1536-float embedding vector.
+    Convert a user's plain-English query into a 1024-float embedding vector.
 
     This embedding is used by the retrieval layer to find the most semantically
     similar COBOL chunks in Pinecone (via cosine similarity).
@@ -368,17 +391,20 @@ async def embed_query(
     as the stored code -- so "how is tax computed?" gets placed near all the
     paragraphs that handle tax calculations.
 
+    Uses input_type="query" for Voyage asymmetric retrieval: query embeddings
+    and document embeddings are optimised differently, improving precision.
+
     Args:
         query_text:    The raw user question (e.g. "How does interest get computed?").
                        Must be non-empty (whitespace-only is rejected too).
-        openai_client: Async OpenAI client (real or mock for tests).
+        voyage_client: Voyage AI client (real or mock for tests).
 
     Returns:
-        A list of 1536 floats representing the query in embedding space.
+        A list of 1024 floats representing the query in embedding space.
 
     Raises:
         ValueError: If query_text is empty or whitespace-only.
-        openai.APIError: If all retry attempts fail.
+        Exception:  If all retry attempts fail.
     """
     if not query_text.strip():
         raise ValueError(
@@ -388,16 +414,18 @@ async def embed_query(
 
     logger.debug("embed_query: embedding query of length %d chars", len(query_text))
 
-    response = await _call_embed_api(openai_client, [query_text])
+    # input_type="query" activates Voyage's asymmetric retrieval optimisation:
+    # queries and documents are embedded differently to improve recall.
+    embeddings = await _call_embed_api(voyage_client, [query_text], input_type="query")
 
-    embedding: list[float] = response.data[0].embedding
+    embedding: list[float] = embeddings[0]
     logger.debug("embed_query: got %d-dim embedding", len(embedding))
     return embedding
 
 
 async def embed_and_upsert(
     chunks: list[COBOLChunk],
-    openai_client: AsyncOpenAI,
+    voyage_client: voyageai.Client,  # type: ignore[name-defined]  # no stubs
     pinecone_wrapper: PineconeWrapper,
     batch_size: int = 100,
 ) -> int:
@@ -405,7 +433,7 @@ async def embed_and_upsert(
     Full ingestion pipeline: embed COBOL chunks and store them in Pinecone.
 
     This function orchestrates two steps:
-    1. embed_chunks() -- convert text to vectors (calls OpenAI)
+    1. embed_chunks() -- convert text to vectors (calls Voyage AI)
     2. pinecone_wrapper.upsert_batch() -- store vectors (calls Pinecone)
 
     Use this as the single entry point when ingesting a COBOL file's chunks.
@@ -414,15 +442,15 @@ async def embed_and_upsert(
     Args:
         chunks:           COBOLChunk objects from the chunker. Can be empty
                           (returns 0 without making any API calls).
-        openai_client:    Async OpenAI client (real or mock for tests).
+        voyage_client:    Voyage AI client (real or mock for tests).
         pinecone_wrapper: PineconeWrapper instance connected to the target index.
-        batch_size:       Max texts per OpenAI embedding call (default 100).
+        batch_size:       Max texts per Voyage embedding call (default 100).
 
     Returns:
         Total number of vectors successfully stored in Pinecone. 0 if empty.
 
     Raises:
-        openai.APIError:       If embedding calls fail after retries.
+        Exception:             If embedding calls fail after retries.
         pinecone.ApiException: If Pinecone upsert fails.
     """
     if not chunks:
@@ -431,7 +459,7 @@ async def embed_and_upsert(
 
     logger.info("embed_and_upsert: processing %d chunks", len(chunks))
 
-    vectors = await embed_chunks(chunks, openai_client, batch_size=batch_size)
+    vectors = await embed_chunks(chunks, voyage_client, batch_size=batch_size)
     upserted = await pinecone_wrapper.upsert_batch(vectors)
 
     logger.info("embed_and_upsert: stored %d vectors in Pinecone", upserted)

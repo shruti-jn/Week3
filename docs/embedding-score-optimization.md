@@ -434,11 +434,89 @@ The two categories of failure:
    embedded SQL with low-level C-style variable names. The query phrase "insert a
    record into a database" doesn't align with `EXEC SQL INSERT INTO books VALUES...`
 
-### Next Steps (Pending)
+### Next Steps (Resolved — see Phase 3 below)
 
-Options under consideration (awaiting direction):
+Options that were under consideration:
 1. **Query tuning** — find query phrasings that score higher for SETKEY and DBsample
 2. **Targeted annotations** — add English `*>` comments to key gnucobol-contrib sections
-   (this is legitimate annotation, not fabricating code)
-3. **Accept the ceiling** — SETKEY and DBsample may simply not be good RAG targets;
-   replace those golden queries with programs that score reliably
+3. **Accept the ceiling** — SETKEY and DBsample may simply not be good RAG targets
+4. **Switch embedding model** → **chosen** (see Phase 3)
+
+---
+
+## Phase 3 — voyage-code-2 Experiment Results
+
+**Date:** 2026-03-03
+**Script:** `backend/scripts/compare_embeddings.py`
+**Method:** Local cosine similarity test — no Pinecone reads or writes.
+Same `build_embedding_text()` output fed to both models; results are a
+pure model-quality comparison, not a text-strategy comparison.
+
+For gq-008 (245 chunks, cgiform.cob), Voyage was run against the top-30
+chunks by OpenAI score to stay within the free-tier 10K TPM limit. The
+comparison is still valid: "does Voyage rank the best candidate higher?"
+
+### Results
+
+| Query ID | Query | Baseline | OpenAI best | Voyage best | Delta | Threshold | Result |
+|---|---|---|---|---|---|---|---|
+| gq-004 | "how to set up encryption keys from a password" | 0.464 | 0.4641 ❌ | **0.7371** ✅ | +0.273 | 0.70 | VOYAGE UNLOCKS |
+| gq-005 | "database connection SQL COBOL program" | 0.693 | 0.6782 ❌ | **0.8518** ✅ | +0.174 | 0.70 | VOYAGE UNLOCKS |
+| gq-006 | "how to insert a record into a database" | 0.491 | 0.4562 ❌ | **0.7451** ✅ | +0.289 | 0.70 | VOYAGE UNLOCKS |
+| gq-008 | "parse HTML form data CGI COBOL" | 0.634 | 0.6210 ❌ | **0.8316** ✅ | +0.211 | 0.65 | VOYAGE UNLOCKS |
+
+**4/4 previously failing queries pass with voyage-code-2.**
+
+### Why voyage-code-2 Wins by Such a Large Margin
+
+The deltas (+0.17 to +0.29) are unusually large for an embedding model swap.
+The root cause is that voyage-code-2 was trained to bridge the
+**natural-language ↔ code** semantic gap — exactly the gap that gnucobol-contrib
+exposes:
+
+- **SETKEY (gq-004):** OpenAI sees "encryption keys from a password" and a table
+  of PC1/PC2 bit-index numbers (0.464). voyage-code-2 understands that key-schedule
+  permutation tables are *how* DES-style ciphers derive keys from passwords (0.737).
+
+- **EXEC SQL (gq-005, gq-006):** OpenAI can't bridge "database connection" to
+  `EXEC SQL CONNECT`, or "insert a record" to `EXEC SQL INSERT INTO books VALUES`.
+  voyage-code-2 was trained on code ↔ NL pairs that include embedded SQL, so both
+  score well above 0.80.
+
+- **CGI form parsing (gq-008):** OpenAI scores COB2CGI section names at 0.62.
+  voyage-code-2 scores the same chunks at 0.83 — it understands that CGI handlers
+  process HTML form data even when the code uses opaque identifiers.
+
+### Cost Comparison
+
+| Model | Embedding cost | Dimensions | Notes |
+|---|---|---|---|
+| text-embedding-3-small | $0.02 / 1M tokens | 1536 | Current model |
+| voyage-code-2 | $0.06 / 1M tokens (document) | 1024 | 3× more expensive |
+| voyage-code-2 | $0.06 / 1M tokens (query) | 1024 | Same rate for queries |
+
+**Re-indexing cost estimate:** 5286 vectors × ~150 tokens/chunk = ~793K tokens
+= **$0.048 one-time cost** to re-index everything.
+
+**Query cost delta:** At 100 queries/day × ~20 tokens/query × 365 days = 730K tokens/year
+= $0.044/year extra. Negligible.
+
+Pinecone dimension note: voyage-code-2 uses **1024 dimensions** vs the current
+1536. The Pinecone index must be recreated with `dimension=1024`.
+
+### Recommendation
+
+**Switch to voyage-code-2 and re-index.** The score improvement is decisive
+(+0.17 to +0.29 on all failing queries), all 4 previously failing queries
+now pass their thresholds, and the cost increase is negligible at our query volume.
+
+**Implementation steps:**
+1. Add `VOYAGE_API_KEY` to Railway environment variables
+2. Delete and recreate the Pinecone `legacylens` index with `dimension=1024`
+3. Replace `openai.embeddings.create(model="text-embedding-3-small")` calls
+   with `voyageai.Client.embed(model="voyage-code-2", input_type="document/query")`
+   in `backend/app/core/ingestion/embedder.py`
+4. Update `EMBEDDING_DIMENSIONS = 1024` in `embedder.py`
+5. Re-run the ingestion pipeline against the full gnucobol-contrib corpus
+6. Re-run golden query evaluation — expect 9/10 passing (gq-002 float-edge
+   and gq-004 were the hardest; both now pass in local tests)

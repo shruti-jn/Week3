@@ -362,7 +362,5 @@ class PineconeWrapper:
                 )
                 time.sleep(delay)
 
-        msg = (
-            f"Pinecone query failed after {_MAX_RETRIES} attempts: {last_exc}"
-        )
+        msg = f"Pinecone query failed after {_MAX_RETRIES} attempts: {last_exc}"
         raise RuntimeError(msg)

@@ -18,6 +18,10 @@ from functools import lru_cache
 from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+# Sentinel used to detect when Langfuse keys are not configured.
+# We use a module-level constant so the Settings class can reference it.
+_LANGFUSE_NOT_SET = ""
+
 
 class Settings(BaseSettings):
     """
@@ -31,8 +35,14 @@ class Settings(BaseSettings):
     """
 
     # ── OpenAI ────────────────────────────────────────────────────────────
-    # Used for: generating embeddings (text-embedding-3-small) and answers (gpt-4o-mini)
+    # Used for: answer generation only (gpt-4o-mini). Embeddings moved to Voyage AI.
     openai_api_key: str = Field(description="OpenAI API key — starts with sk-")
+
+    # ── Voyage AI ─────────────────────────────────────────────────────────
+    # Used for: generating embeddings (voyage-code-2, 1024 dims).
+    # voyage-code-2 is code-specific and scores +0.17 to +0.29 higher than
+    # text-embedding-3-small on COBOL ↔ natural-language retrieval tasks.
+    voyage_api_key: str = Field(description="Voyage AI API key — starts with pk-live-")
 
     # ── Pinecone ──────────────────────────────────────────────────────────
     # Used for: storing and searching COBOL code embeddings
@@ -90,6 +100,28 @@ class Settings(BaseSettings):
         description="Minimum Pinecone similarity score to use a chunk (0.0 to 1.0)",
     )
 
+    # ── Langfuse Observability (optional) ─────────────────────────────────
+    # Langfuse traces every query — embed, retrieve, rerank, and LLM steps —
+    # so you can see latency breakdowns and debug slow or failed queries.
+    # Leave these empty to run without tracing (the app works fine without them).
+    langfuse_secret_key: str = Field(
+        default=_LANGFUSE_NOT_SET,
+        description="Langfuse secret key (sk-lf-...). Leave empty to disable tracing.",
+    )
+    langfuse_public_key: str = Field(
+        default=_LANGFUSE_NOT_SET,
+        description="Langfuse public key (pk-lf-...). Leave empty to disable tracing.",
+    )
+    langfuse_base_url: str = Field(
+        default="https://cloud.langfuse.com",
+        description="Langfuse host URL. Override for self-hosted instances.",
+    )
+
+    @property
+    def langfuse_enabled(self) -> bool:
+        """True when both Langfuse keys are configured."""
+        return bool(self.langfuse_secret_key and self.langfuse_public_key)
+
     # Pydantic-settings configuration:
     # - env_file: read from .env file in the backend directory during development
     # - env_file_encoding: use UTF-8 so international characters work
@@ -115,4 +147,4 @@ def get_settings() -> Settings:
         settings = get_settings()
         api_key = settings.openai_api_key
     """
-    return Settings()
+    return Settings()  # type: ignore[call-arg] -- pydantic-settings reads fields from env vars, not constructor args

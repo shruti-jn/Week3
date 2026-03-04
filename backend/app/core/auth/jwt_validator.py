@@ -44,7 +44,8 @@ def validate_nextauth_token(token: str, secret: str) -> dict[str, Any]:
 
     Args:
         token:  The JWT string from the Authorization header (without "Bearer " prefix).
-        secret: The NEXTAUTH_SECRET from app settings. Must match what NextAuth used to sign.
+        secret: The NEXTAUTH_SECRET from app settings. Must match what NextAuth
+                used to sign.
 
     Returns:
         Decoded JWT payload as a plain dict. Contains at minimum:
@@ -80,16 +81,16 @@ def validate_nextauth_token(token: str, secret: str) -> dict[str, Any]:
             algorithms=[_ALGORITHM],
             options={
                 "require_exp": True,  # Token must have an expiry claim
-                "verify_exp": True,   # Actually check that it hasn't expired
+                "verify_exp": True,  # Actually check that it hasn't expired
             },
         )
-    except ExpiredSignatureError:
+    except ExpiredSignatureError as exc:
         logger.warning("JWT validation failed: token expired")
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Session expired — please log in again",
             headers={"WWW-Authenticate": "Bearer"},
-        )
+        ) from exc
     except JWTError as exc:
         # JWTError covers: invalid signature, malformed token, wrong algorithm, etc.
         logger.warning("JWT validation failed: %s", exc)
@@ -97,7 +98,7 @@ def validate_nextauth_token(token: str, secret: str) -> dict[str, Any]:
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid authentication token",
             headers={"WWW-Authenticate": "Bearer"},
-        )
+        ) from exc
 
     # Require 'sub' (subject = user ID) — this is the GitHub user ID.
     # Without it we can't identify who made the request.
