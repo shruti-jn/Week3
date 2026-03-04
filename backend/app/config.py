@@ -147,4 +147,4 @@ def get_settings() -> Settings:
         settings = get_settings()
         api_key = settings.openai_api_key
     """
-    return Settings()  # type: ignore[call-arg] -- pydantic-settings reads fields from env vars, not constructor args
+    return Settings()
