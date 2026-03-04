@@ -9,10 +9,10 @@
  * We use Next.js server-side redirect for instant navigation without flash.
  */
 
-import { redirect } from "next/navigation";
+import { redirect } from 'next/navigation'
 
-export default function HomePage() {
+export default function HomePage(): never {
   // Always redirect to /search — the middleware handles unauthenticated users.
   // Logged-in users land here briefly then go to /search.
-  redirect("/search");
+  redirect('/search')
 }
