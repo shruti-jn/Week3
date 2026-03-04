@@ -1,4 +1,4 @@
-"use client";
+'use client'
 
 /**
  * AuthButton — shows sign-in or sign-out button based on authentication state.
@@ -11,25 +11,23 @@
  * @param className - Optional CSS classes to apply to the wrapper div
  */
 
-import { signIn, signOut, useSession } from "next-auth/react";
+import { signIn, signOut, useSession } from 'next-auth/react'
 
 interface AuthButtonProps {
   /** Optional CSS classes to apply to the container div. */
-  className?: string;
+  className?: string
 }
 
-export default function AuthButton({
-  className,
-}: AuthButtonProps): React.JSX.Element | null {
-  const { data: session, status } = useSession();
+export default function AuthButton({ className }: AuthButtonProps): React.JSX.Element | null {
+  const { data: session, status } = useSession()
 
   // During session check, show a skeleton to prevent layout shift.
-  if (status === "loading") {
+  if (status === 'loading') {
     return (
       <div
-        className={`h-9 animate-pulse rounded border border-terminal-border bg-terminal-bg ${className ?? ""}`}
+        className={`h-9 animate-pulse rounded border border-terminal-border bg-terminal-bg ${className ?? ''}`}
       />
-    );
+    )
   }
 
   // User is not authenticated — show the GitHub sign-in button
@@ -37,8 +35,8 @@ export default function AuthButton({
     return (
       <div className={className}>
         <button
-          onClick={() => void signIn("github")}
-          className="inline-flex w-full items-center justify-center gap-3 rounded border border-terminal-border bg-terminal-bg px-4 py-2.5 text-sm font-medium text-terminal-text transition-all duration-150 hover:border-terminal-accent hover:text-terminal-accent accent-glow-sm focus:outline-none focus:ring-1 focus:ring-terminal-accent"
+          onClick={() => void signIn('github', { callbackUrl: '/search' })}
+          className="accent-glow-sm inline-flex w-full items-center justify-center gap-3 rounded border border-terminal-border bg-terminal-bg px-4 py-2.5 text-sm font-medium text-terminal-text transition-all duration-150 hover:border-terminal-accent hover:text-terminal-accent focus:outline-none focus:ring-1 focus:ring-terminal-accent"
           aria-label="Sign in with GitHub"
         >
           {/* GitHub logo SVG */}
@@ -57,22 +55,22 @@ export default function AuthButton({
           Sign in with GitHub
         </button>
       </div>
-    );
+    )
   }
 
   // User is authenticated — show their name and a sign-out button
   return (
-    <div className={`flex items-center gap-3 ${className ?? ""}`}>
+    <div className={`flex items-center gap-3 ${className ?? ''}`}>
       <span className="text-sm text-terminal-accent">
-        {session.user?.name ?? session.user?.email ?? "user"}
+        {session.user?.name ?? session.user?.email ?? 'user'}
       </span>
       <button
-        onClick={() => void signOut({ callbackUrl: "/login" })}
+        onClick={() => void signOut({ callbackUrl: '/login' })}
         className="rounded border border-terminal-border px-3 py-1 text-xs text-terminal-muted transition-all hover:border-terminal-accent hover:text-terminal-accent focus:outline-none"
         aria-label="Sign out"
       >
         ↩ sign out
       </button>
     </div>
-  );
+  )
 }
