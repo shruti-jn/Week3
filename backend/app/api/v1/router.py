@@ -14,8 +14,13 @@ To add a new endpoint:
 from typing import Any
 
 from fastapi import APIRouter, Depends
+from fastapi.responses import StreamingResponse
+from openai import AsyncOpenAI
+from pinecone import Pinecone
 
 from app.api.v1.dependencies import get_current_user
+from app.config import get_settings
+from app.core.query_pipeline import stream_query_sse
 from app.models.requests import (
     BusinessLogicRequest,
     DependenciesRequest,
@@ -28,40 +33,56 @@ from app.models.responses import (
     DependenciesResponse,
     ExplainResponse,
     ImpactResponse,
-    QueryResponse,
-    StubResponse,
 )
 
 api_router = APIRouter()
 
 
-# ── Placeholder: Query endpoint ──────────────────────────────────────────────
-# This stub accepts a proper typed request body while the real implementation
-# is being built in feature/api-full-pipeline.
-#
-# Replaced by: feature/api-full-pipeline
-@api_router.post("/query", response_model=StubResponse, tags=["query"])
-async def query_stub(
+# ── Query endpoint — full SSE pipeline ───────────────────────────────────────
+@api_router.post("/query", tags=["query"])
+async def query_endpoint(
     request: QueryRequest,
-    current_user: dict[str, Any] = Depends(get_current_user),
-) -> StubResponse:
+) -> StreamingResponse:
     """
-    Stub: Query the COBOL codebase with a natural language question.
+    Query the COBOL codebase with a natural language question.
 
-    TEMPORARY: Returns a hardcoded stub response. Auth is live.
-    Full pipeline (embedding, retrieval, generation) wired in feature/api-full-pipeline.
+    Returns a Server-Sent Events (SSE) stream in this order:
+      1. event: snippets — list of matching COBOL code chunks (JSON array)
+      2. event: token    — one chunk of the GPT answer (repeats many times)
+      3. event: done     — pipeline finished
+      OR
+      1. event: error    — something failed
 
     Args:
-        request:      Validated query with plain-English question and top_k setting.
-        current_user: Decoded JWT payload injected by get_current_user dependency.
+        request: Validated query with question and top_k setting.
 
     Returns:
-        StubResponse with status="stub" until the pipeline is implemented.
+        StreamingResponse with media_type="text/event-stream".
     """
-    _ = request, current_user  # will be used when real logic is wired
-    return StubResponse(
-        status="stub",
-        message="Query endpoint not yet implemented — this is a scaffold stub",
+    # TODO: Re-add Depends(get_current_user) before deploying to production.
+    settings = get_settings()
+
+    # Create fresh clients per request. These are lightweight objects that
+    # hold config, not persistent connections — acceptable for our demo scale.
+    openai_client = AsyncOpenAI(api_key=settings.openai_api_key)
+    pinecone_client = Pinecone(api_key=settings.pinecone_api_key)
+
+    return StreamingResponse(
+        stream_query_sse(
+            query=request.query,
+            top_k=request.top_k,
+            openai_client=openai_client,
+            pinecone_client=pinecone_client,
+            settings=settings,
+        ),
+        media_type="text/event-stream",
+        headers={
+            # Prevent proxies and CDNs from buffering the stream.
+            "Cache-Control": "no-cache",
+            "X-Accel-Buffering": "no",
+            # Allow the frontend to read these headers cross-origin.
+            "Access-Control-Expose-Headers": "Content-Type",
+        },
     )
 
 
@@ -69,9 +90,9 @@ async def query_stub(
 @api_router.post("/explain", response_model=ExplainResponse, tags=["features"])
 async def explain_stub(
     request: ExplainRequest,
-    current_user: dict[str, Any] = Depends(get_current_user),
+    current_user: dict[str, Any] = Depends(get_current_user),  # noqa: B008
 ) -> ExplainResponse:
-    """Stub: Code Explanation feature (Feature 1). Replaced in feature/api-code-features."""
+    """Stub: Code Explanation (Feature 1). Replaced in feature/api-code-features."""
     _ = current_user
     return ExplainResponse(
         status="stub",
@@ -86,9 +107,9 @@ async def explain_stub(
 )
 async def dependencies_stub(
     request: DependenciesRequest,
-    current_user: dict[str, Any] = Depends(get_current_user),
+    current_user: dict[str, Any] = Depends(get_current_user),  # noqa: B008
 ) -> DependenciesResponse:
-    """Stub: Dependency Mapping feature (Feature 2). Replaced in feature/api-code-features."""
+    """Stub: Dependency Mapping (Feature 2). Replaced in feature/api-code-features."""
     _ = current_user
     return DependenciesResponse(
         status="stub",
@@ -103,9 +124,9 @@ async def dependencies_stub(
 )
 async def business_logic_stub(
     request: BusinessLogicRequest,
-    current_user: dict[str, Any] = Depends(get_current_user),
+    current_user: dict[str, Any] = Depends(get_current_user),  # noqa: B008
 ) -> BusinessLogicResponse:
-    """Stub: Business Logic Extraction feature (Feature 3). Replaced in feature/api-code-features."""
+    """Stub: Business Logic (Feature 3). Replaced in feature/api-code-features."""
     _ = current_user
     return BusinessLogicResponse(
         status="stub",
@@ -118,9 +139,9 @@ async def business_logic_stub(
 @api_router.post("/impact", response_model=ImpactResponse, tags=["features"])
 async def impact_stub(
     request: ImpactRequest,
-    current_user: dict[str, Any] = Depends(get_current_user),
+    current_user: dict[str, Any] = Depends(get_current_user),  # noqa: B008
 ) -> ImpactResponse:
-    """Stub: Impact Analysis feature (Feature 4). Replaced in feature/api-code-features."""
+    """Stub: Impact Analysis (Feature 4). Replaced in feature/api-code-features."""
     _ = current_user
     return ImpactResponse(
         status="stub",

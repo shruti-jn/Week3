@@ -17,15 +17,20 @@
 
 import { withAuth } from "next-auth/middleware";
 
-export default withAuth({
-  /**
-   * pages config tells NextAuth where to redirect unauthenticated users.
-   * Must match the signIn page defined in authOptions (src/lib/auth.ts).
-   */
-  pages: {
-    signIn: "/login",
-  },
-});
+// In development, allow unauthenticated access to /search for demo purposes.
+// Re-enable auth protection before deploying to production.
+const isDev = process.env.NODE_ENV === "development";
+
+export default isDev
+  ? // eslint-disable-next-line @typescript-eslint/explicit-function-return-type
+    function devMiddleware() {
+      return; // pass-through — no auth check in dev
+    }
+  : withAuth({
+      pages: {
+        signIn: "/login",
+      },
+    });
 
 /**
  * matcher controls which routes the middleware runs on.
