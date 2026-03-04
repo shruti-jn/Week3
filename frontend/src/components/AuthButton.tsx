@@ -3,15 +3,10 @@
 /**
  * AuthButton — shows sign-in or sign-out button based on authentication state.
  *
- * Think of this like the "Login/Logout" button in Gmail:
- * - If you're not logged in: shows "Sign in with GitHub"
- * - If you're logged in: shows your name + "Sign out"
- * - While loading: shows nothing (prevents flicker of wrong state)
- *
- * This is a Client Component ("use client" directive at the top) because:
- * 1. It uses useSession() which relies on browser cookies
- * 2. It handles click events (signIn/signOut)
- * 3. It changes based on auth state after the page loads
+ * Terminal-themed: dark background, green accent border, monospace type.
+ * - Not authenticated: "Sign in with GitHub" with GitHub SVG logo
+ * - Authenticated: username + "↩ sign out" inline
+ * - Loading: skeleton placeholder (prevents flicker)
  *
  * @param className - Optional CSS classes to apply to the wrapper div
  */
@@ -23,14 +18,18 @@ interface AuthButtonProps {
   className?: string;
 }
 
-export default function AuthButton({ className }: AuthButtonProps) {
+export default function AuthButton({
+  className,
+}: AuthButtonProps): React.JSX.Element | null {
   const { data: session, status } = useSession();
 
-  // During session check, render nothing to prevent a flash of the wrong button.
-  // Without this, logged-in users would briefly see "Sign in" before the
-  // session cookie is read from the browser.
+  // During session check, show a skeleton to prevent layout shift.
   if (status === "loading") {
-    return null;
+    return (
+      <div
+        className={`h-9 animate-pulse rounded border border-terminal-border bg-terminal-bg ${className ?? ""}`}
+      />
+    );
   }
 
   // User is not authenticated — show the GitHub sign-in button
@@ -38,13 +37,13 @@ export default function AuthButton({ className }: AuthButtonProps) {
     return (
       <div className={className}>
         <button
-          onClick={() => signIn("github")}
-          className="inline-flex items-center gap-2 rounded-md bg-gray-900 px-4 py-2 text-sm font-medium text-white hover:bg-gray-700 focus:outline-none focus:ring-2 focus:ring-gray-500"
+          onClick={() => void signIn("github")}
+          className="inline-flex w-full items-center justify-center gap-3 rounded border border-terminal-border bg-terminal-bg px-4 py-2.5 text-sm font-medium text-terminal-text transition-all duration-150 hover:border-terminal-accent hover:text-terminal-accent accent-glow-sm focus:outline-none focus:ring-1 focus:ring-terminal-accent"
           aria-label="Sign in with GitHub"
         >
           {/* GitHub logo SVG */}
           <svg
-            className="h-4 w-4"
+            className="h-4 w-4 flex-shrink-0"
             fill="currentColor"
             viewBox="0 0 24 24"
             aria-hidden="true"
@@ -64,15 +63,15 @@ export default function AuthButton({ className }: AuthButtonProps) {
   // User is authenticated — show their name and a sign-out button
   return (
     <div className={`flex items-center gap-3 ${className ?? ""}`}>
-      <span className="text-sm text-gray-700">
-        {session.user?.name ?? session.user?.email ?? "User"}
+      <span className="text-sm text-terminal-accent">
+        {session.user?.name ?? session.user?.email ?? "user"}
       </span>
       <button
-        onClick={() => signOut({ callbackUrl: "/login" })}
-        className="rounded-md border border-gray-300 px-3 py-1.5 text-sm font-medium text-gray-700 hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-gray-500"
+        onClick={() => void signOut({ callbackUrl: "/login" })}
+        className="rounded border border-terminal-border px-3 py-1 text-xs text-terminal-muted transition-all hover:border-terminal-accent hover:text-terminal-accent focus:outline-none"
         aria-label="Sign out"
       >
-        Sign out
+        ↩ sign out
       </button>
     </div>
   );

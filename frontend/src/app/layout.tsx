@@ -1,21 +1,13 @@
 /**
- * Root layout — wraps every page in the app.
+ * Root layout — wraps every page in the app with the terminal theme.
  *
- * This is the outermost shell of the application. Every page rendered
- * in LegacyLens inherits from this layout.
- *
- * Why do we need SessionProvider here?
- * NextAuth's useSession() hook (used by AuthButton and other components)
- * reads the current session from a React context. SessionProvider sets up
- * that context. Without it, useSession() would throw an error.
- *
- * SessionProvider must be in a Client Component because it uses React context.
- * We wrap just the SessionProvider in a thin "Providers" client component
- * to keep the root layout as a Server Component for better performance.
+ * Imports globals.css which sets up Tailwind + our dark terminal aesthetic.
+ * SessionProvider lives in Providers (a Client Component) so this file
+ * can remain a Server Component.
  */
 
 import type { Metadata } from "next";
-
+import "./globals.css";
 import Providers from "./providers";
 
 export const metadata: Metadata = {
@@ -28,14 +20,23 @@ export default function RootLayout({
   children,
 }: {
   children: React.ReactNode;
-}) {
+}): React.JSX.Element {
   return (
-    <html lang="en">
-      <body>
-        {/*
-         * Providers wraps the app with SessionProvider and any future
-         * context providers (theme, toast notifications, etc.).
-         */}
+    <html lang="en" className="h-full">
+      <head>
+        {/* Preconnect to Google Fonts for JetBrains Mono */}
+        <link rel="preconnect" href="https://fonts.googleapis.com" />
+        <link
+          rel="preconnect"
+          href="https://fonts.gstatic.com"
+          crossOrigin="anonymous"
+        />
+        <link
+          href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300;400;500;600&display=swap"
+          rel="stylesheet"
+        />
+      </head>
+      <body className="scanlines h-full bg-terminal-bg text-terminal-text">
         <Providers>{children}</Providers>
       </body>
     </html>
