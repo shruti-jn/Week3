@@ -39,14 +39,17 @@ async def test_health_check(test_client: AsyncClient) -> None:
 
 @pytest.mark.asyncio
 async def test_query_stub_returns_stub_status(test_client: AsyncClient) -> None:
-    """Query endpoint with valid input returns stub status."""
+    """Query endpoint with valid input returns 200 with SSE stream.
+
+    The /query endpoint is no longer a stub — it runs the full RAG pipeline.
+    It returns a Server-Sent Events stream (text/event-stream), not JSON.
+    """
     response = await test_client.post(
         "/api/v1/query",
         json={"query": "How does payroll calculation work?"},
     )
     assert response.status_code == 200
-    data = response.json()
-    assert data["status"] == "stub"
+    assert "text/event-stream" in response.headers.get("content-type", "")
 
 
 @pytest.mark.asyncio

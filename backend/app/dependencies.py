@@ -17,13 +17,14 @@ Usage in a route:
     async def query(
         request: QueryRequest,
         pinecone: Pinecone = Depends(get_pinecone_client),
-        openai: AsyncOpenAI = Depends(get_openai_client),
+        voyage: voyageai.Client = Depends(get_voyage_client),
     ) -> QueryResponse:
         ...
 """
 
 from functools import lru_cache
 
+import voyageai
 from openai import AsyncOpenAI
 from pinecone import Pinecone
 
@@ -50,13 +51,32 @@ def get_pinecone_client() -> Pinecone:
 
 
 @lru_cache
+def get_voyage_client() -> voyageai.Client:  # type: ignore[name-defined]  # no stubs
+    """
+    Create and return a Voyage AI embedding client (cached — created only once).
+
+    Voyage AI provides voyage-code-2, a code-specific embedding model trained
+    to bridge the gap between natural-language queries and code constructs
+    (SQL, COBOL, identifiers). It scores +0.17 to +0.29 higher than
+    text-embedding-3-small on COBOL ↔ natural-language retrieval tasks.
+
+    voyageai.Client is synchronous. The embedder module wraps calls in
+    asyncio.to_thread() so the FastAPI async event loop stays unblocked.
+
+    Returns:
+        A configured Voyage AI client ready to use.
+    """
+    settings = get_settings()
+    return voyageai.Client(api_key=settings.voyage_api_key)  # type: ignore[attr-defined]  # no stubs
+
+
+@lru_cache
 def get_openai_client() -> AsyncOpenAI:
     """
     Create and return an async OpenAI client (cached — created only once).
 
-    OpenAI provides two capabilities we use:
-    1. text-embedding-3-small: converts text to numbers (embeddings)
-    2. gpt-4o-mini: generates natural-language answers from COBOL context
+    After switching embeddings to Voyage AI, OpenAI is used only for:
+    - gpt-4o-mini: generates natural-language answers from COBOL context (streaming)
 
     AsyncOpenAI is the async version — it doesn't block while waiting
     for OpenAI's API response, so other requests can be handled meanwhile.

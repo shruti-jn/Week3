@@ -31,6 +31,10 @@ class CodeSnippet(BaseModel):
 
     Each snippet has a similarity score: 1.0 means a perfect match,
     0.75 is our minimum threshold (anything lower is ignored).
+
+    chunk_type tells you whether this snippet was split at a natural COBOL
+    paragraph boundary ("paragraph") or cut at a fixed line count ("fixed").
+    Paragraph chunks are usually more semantically coherent.
     """
 
     file_path: str = Field(
@@ -58,6 +62,12 @@ class CodeSnippet(BaseModel):
         ge=0.0,
         le=1.0,
         description="Cosine similarity score from Pinecone (0.0-1.0).",
+    )
+    chunk_type: str = Field(
+        default="paragraph",
+        description=(
+            'Chunking strategy: "paragraph" = COBOL boundary, "fixed" = line count.'
+        ),
     )
 
     def model_post_init(self, __context: object) -> None:

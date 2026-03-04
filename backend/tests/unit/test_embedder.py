@@ -2,21 +2,21 @@
 Unit tests for the embedder module.
 
 The embedder is the bridge between raw COBOL chunks and the Pinecone vector store.
-It converts text into numbers (embeddings) using OpenAI, then stores those numbers
+It converts text into numbers (embeddings) using Voyage AI, then stores those numbers
 in Pinecone so we can later find similar chunks by meaning.
 
 Think of embeddings like GPS coordinates for words -- two pieces of text that mean
 similar things get similar coordinates. The embedder computes those coordinates.
 
 Test strategy:
-- All OpenAI and Pinecone calls are mocked (no real API calls, no money spent)
+- All Voyage and Pinecone calls are mocked (no real API calls, no money spent)
 - Edge cases: empty input, single chunk, large batches, fallback chunks
-- Error paths: OpenAI failure propagates; empty list skips the API entirely
+- Error paths: Voyage failure propagates; empty list skips the API entirely
 """
 
 from __future__ import annotations
 
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import MagicMock, patch
 
 import pytest
 
@@ -62,40 +62,46 @@ def make_chunk(
     )
 
 
-def make_mock_openai(n_per_call: int | None = None) -> AsyncMock:
+def make_mock_voyage(n_per_call: int | None = None) -> MagicMock:
     """
-    Build a mock OpenAI client whose embeddings.create() returns N embeddings.
+    Build a mock Voyage AI client whose embed() returns N embeddings.
+
+    Voyage's client is synchronous (voyageai.Client). The embedder wraps it
+    in asyncio.to_thread() so the async event loop stays unblocked.
 
     If n_per_call is None, the mock automatically returns as many embeddings
-    as there are texts in the `input` argument (realistic behaviour).
+    as there are texts in the first argument (realistic behaviour).
     If n_per_call is given, it always returns exactly that many embeddings.
 
-    Each fake embedding is 1536 floats with value 0.1 (matches the conftest mock).
-    """
-    client = AsyncMock()
+    Each fake embedding is EMBEDDING_DIMENSIONS floats with value 0.1.
 
-    async def create_embeddings(
+    Returns:
+        A synchronous MagicMock that simulates voyageai.Client.
+    """
+    client = MagicMock()
+
+    def embed_side_effect(
+        texts: list[str],
         model: str,
-        input: list[str],
-        **kwargs: object,
+        input_type: str = "document",
     ) -> MagicMock:
-        n = n_per_call if n_per_call is not None else len(input)
+        n = n_per_call if n_per_call is not None else len(texts)
         response = MagicMock()
-        response.data = [
-            MagicMock(embedding=[0.1] * EMBEDDING_DIMENSIONS) for _ in range(n)
-        ]
+        response.embeddings = [[0.1] * EMBEDDING_DIMENSIONS for _ in range(n)]
         return response
 
-    client.embeddings.create = AsyncMock(side_effect=create_embeddings)
+    client.embed = MagicMock(side_effect=embed_side_effect)
     return client
 
 
-def make_mock_pinecone_wrapper(upsert_return: int = 0) -> AsyncMock:
+def make_mock_pinecone_wrapper(upsert_return: int = 0) -> MagicMock:
     """
     Build a mock PineconeWrapper whose upsert_batch() returns a fixed count.
 
     The count is what embed_and_upsert() returns -- the number of vectors stored.
     """
+    from unittest.mock import AsyncMock
+
     wrapper = AsyncMock(spec=PineconeWrapper)
     wrapper.upsert_batch = AsyncMock(return_value=upsert_return)
     return wrapper
@@ -113,55 +119,55 @@ async def test_embed_chunks_happy_path() -> None:
         make_chunk(paragraph_name="DISPLAY-RESULT", chunk_index=1),
         make_chunk(paragraph_name="VALIDATE-INPUT", chunk_index=2),
     ]
-    openai_client = make_mock_openai()
+    voyage_client = make_mock_voyage()
 
-    result = await embed_chunks(chunks, openai_client)
+    result = await embed_chunks(chunks, voyage_client)
 
     assert len(result) == 3
     assert all(len(v.embedding) == EMBEDDING_DIMENSIONS for v in result)
 
 
 async def test_embed_chunks_empty_list_returns_empty_without_api_call() -> None:
-    """Empty input -> return [] and never call the OpenAI API."""
-    openai_client = make_mock_openai()
+    """Empty input -> return [] and never call the Voyage API."""
+    voyage_client = make_mock_voyage()
 
-    result = await embed_chunks([], openai_client)
+    result = await embed_chunks([], voyage_client)
 
     assert result == []
-    openai_client.embeddings.create.assert_not_called()
+    voyage_client.embed.assert_not_called()
 
 
 async def test_embed_chunks_single_chunk() -> None:
     """One chunk in, one ChunkVector out."""
     chunks = [make_chunk(chunk_index=0)]
-    openai_client = make_mock_openai()
+    voyage_client = make_mock_voyage()
 
-    result = await embed_chunks(chunks, openai_client)
+    result = await embed_chunks(chunks, voyage_client)
 
     assert len(result) == 1
     assert result[0].embedding == [0.1] * EMBEDDING_DIMENSIONS
 
 
 async def test_embed_chunks_large_batch_splits_into_multiple_api_calls() -> None:
-    """150 chunks with batch_size=100 must produce exactly 2 OpenAI API calls."""
+    """150 chunks with batch_size=100 must produce exactly 2 Voyage API calls."""
     chunks = [make_chunk(chunk_index=i) for i in range(150)]
-    openai_client = make_mock_openai()
+    voyage_client = make_mock_voyage()
 
-    result = await embed_chunks(chunks, openai_client, batch_size=100)
+    result = await embed_chunks(chunks, voyage_client, batch_size=100)
 
     # 150 chunks / 100 per batch = 2 calls (100 + 50)
-    assert openai_client.embeddings.create.call_count == 2
+    assert voyage_client.embed.call_count == 2
     assert len(result) == 150
 
 
 async def test_embed_chunks_batch_boundary_exact_multiple() -> None:
     """4 chunks with batch_size=2 -> exactly 2 API calls (perfect split)."""
     chunks = [make_chunk(chunk_index=i) for i in range(4)]
-    openai_client = make_mock_openai()
+    voyage_client = make_mock_voyage()
 
-    result = await embed_chunks(chunks, openai_client, batch_size=2)
+    result = await embed_chunks(chunks, voyage_client, batch_size=2)
 
-    assert openai_client.embeddings.create.call_count == 2
+    assert voyage_client.embed.call_count == 2
     assert len(result) == 4
 
 
@@ -170,9 +176,9 @@ async def test_embed_chunks_preserves_chunk_order() -> None:
     chunks = [
         make_chunk(paragraph_name=f"PARA-{i}", chunk_index=i) for i in range(5)
     ]
-    openai_client = make_mock_openai()
+    voyage_client = make_mock_voyage()
 
-    result = await embed_chunks(chunks, openai_client)
+    result = await embed_chunks(chunks, voyage_client)
 
     result_ids = [v.id for v in result]
     expected_prefix = "programs/loan-calc.cob::PARA-"
@@ -191,9 +197,9 @@ async def test_embed_chunks_vector_id_named_paragraph() -> None:
         paragraph_name="COMPUTE-TAX",
         chunk_index=0,
     )
-    openai_client = make_mock_openai()
+    voyage_client = make_mock_voyage()
 
-    result = await embed_chunks([chunk], openai_client)
+    result = await embed_chunks([chunk], voyage_client)
 
     assert result[0].id == "programs/payroll.cob::COMPUTE-TAX"
 
@@ -206,9 +212,9 @@ async def test_embed_chunks_vector_id_fallback_chunk() -> None:
         chunk_index=3,
         is_fallback=True,
     )
-    openai_client = make_mock_openai()
+    voyage_client = make_mock_voyage()
 
-    result = await embed_chunks([chunk], openai_client)
+    result = await embed_chunks([chunk], voyage_client)
 
     assert result[0].id == "programs/old-payroll.cob::chunk_3"
 
@@ -229,9 +235,9 @@ async def test_embed_chunks_metadata_contains_all_required_fields() -> None:
         chunk_index=0,
         is_fallback=False,
     )
-    openai_client = make_mock_openai()
+    voyage_client = make_mock_voyage()
 
-    result = await embed_chunks([chunk], openai_client)
+    result = await embed_chunks([chunk], voyage_client)
 
     meta = result[0].metadata
     assert meta["file_path"] == "programs/loan-calc.cob"
@@ -246,21 +252,21 @@ async def test_embed_chunks_metadata_contains_all_required_fields() -> None:
 async def test_embed_chunks_metadata_fallback_paragraph_name_empty_string() -> None:
     """Fallback chunks store paragraph_name as empty string (not None) in metadata."""
     chunk = make_chunk(paragraph_name=None, is_fallback=True)
-    openai_client = make_mock_openai()
+    voyage_client = make_mock_voyage()
 
-    result = await embed_chunks([chunk], openai_client)
+    result = await embed_chunks([chunk], voyage_client)
 
     # Pinecone metadata values must be strings -- None is not valid
     assert result[0].metadata["paragraph_name"] == ""
     assert result[0].metadata["is_fallback"] is True
 
 
-async def test_embed_chunks_embedding_values_match_openai_response() -> None:
-    """Embedding in ChunkVector must be exactly what OpenAI returned."""
+async def test_embed_chunks_embedding_values_match_voyage_response() -> None:
+    """Embedding in ChunkVector must be exactly what Voyage returned."""
     chunk = make_chunk()
-    openai_client = make_mock_openai()
+    voyage_client = make_mock_voyage()
 
-    result = await embed_chunks([chunk], openai_client)
+    result = await embed_chunks([chunk], voyage_client)
 
     assert result[0].embedding == [0.1] * EMBEDDING_DIMENSIONS
 
@@ -270,26 +276,26 @@ async def test_embed_chunks_embedding_values_match_openai_response() -> None:
 # ─────────────────────────────────────────────────────────────────────────────
 
 
-async def test_embed_chunks_openai_error_propagates_after_retries() -> None:
-    """When OpenAI raises on every retry attempt, the error bubbles up."""
+async def test_embed_chunks_voyage_error_propagates_after_retries() -> None:
+    """When Voyage raises on every retry attempt, the error bubbles up."""
     chunk = make_chunk()
-    client = AsyncMock()
-    client.embeddings.create = AsyncMock(side_effect=RuntimeError("OpenAI rate limit"))
+    client = MagicMock()
+    client.embed = MagicMock(side_effect=RuntimeError("Voyage rate limit"))
 
     # Mock asyncio.sleep so retry backoff doesn't slow down the test suite
     with patch("app.core.ingestion.embedder.asyncio.sleep"):
-        with pytest.raises(RuntimeError, match="OpenAI rate limit"):
+        with pytest.raises(RuntimeError, match="Voyage rate limit"):
             await embed_chunks([chunk], client, batch_size=100)
 
 
-async def test_embed_chunks_openai_error_on_second_batch_propagates() -> None:
+async def test_embed_chunks_voyage_error_on_second_batch_propagates() -> None:
     """Error that persists across all retries on batch 2 propagates correctly."""
     chunks = [make_chunk(chunk_index=i) for i in range(4)]
-    client = AsyncMock()
+    client = MagicMock()
     call_count = 0
 
-    async def create_side_effect(
-        model: str, input: list[str], **kwargs: object
+    def embed_side_effect(
+        texts: list[str], model: str, input_type: str = "document"
     ) -> MagicMock:
         nonlocal call_count
         call_count += 1
@@ -299,12 +305,10 @@ async def test_embed_chunks_openai_error_on_second_batch_propagates() -> None:
         if call_count > 1:
             raise RuntimeError("batch 2 failed")
         response = MagicMock()
-        response.data = [
-            MagicMock(embedding=[0.1] * EMBEDDING_DIMENSIONS) for _ in input
-        ]
+        response.embeddings = [[0.1] * EMBEDDING_DIMENSIONS for _ in texts]
         return response
 
-    client.embeddings.create = AsyncMock(side_effect=create_side_effect)
+    client.embed = MagicMock(side_effect=embed_side_effect)
 
     # Mock asyncio.sleep so retry backoff doesn't slow down the test suite
     with patch("app.core.ingestion.embedder.asyncio.sleep"):
@@ -318,55 +322,66 @@ async def test_embed_chunks_openai_error_on_second_batch_propagates() -> None:
 
 
 async def test_embed_query_happy_path() -> None:
-    """Query text -> list of 1536 floats."""
-    openai_client = make_mock_openai()
+    """Query text -> list of 1024 floats (voyage-code-2 dimensions)."""
+    voyage_client = make_mock_voyage()
 
-    result = await embed_query("How does the interest calculation work?", openai_client)
+    result = await embed_query("How does the interest calculation work?", voyage_client)
 
     assert len(result) == EMBEDDING_DIMENSIONS
     assert isinstance(result[0], float)
 
 
 async def test_embed_query_uses_correct_model() -> None:
-    """embed_query must use text-embedding-3-small (our chosen model)."""
-    openai_client = make_mock_openai()
+    """embed_query must use voyage-code-2 (our chosen model)."""
+    voyage_client = make_mock_voyage()
 
-    await embed_query("some query", openai_client)
+    await embed_query("some query", voyage_client)
 
-    call_kwargs = openai_client.embeddings.create.call_args
+    call_kwargs = voyage_client.embed.call_args
     used_model = call_kwargs.kwargs.get("model") or (
-        call_kwargs.args[0] if call_kwargs.args else None
+        call_kwargs.args[1] if len(call_kwargs.args) > 1 else None
     )
     assert used_model == EMBEDDING_MODEL
 
 
+async def test_embed_query_uses_query_input_type() -> None:
+    """embed_query must pass input_type='query' for asymmetric retrieval."""
+    voyage_client = make_mock_voyage()
+
+    await embed_query("some query", voyage_client)
+
+    call_kwargs = voyage_client.embed.call_args
+    used_input_type = call_kwargs.kwargs.get("input_type")
+    assert used_input_type == "query"
+
+
 async def test_embed_query_raises_on_empty_string() -> None:
-    """Empty query string must raise ValueError before calling OpenAI."""
-    openai_client = make_mock_openai()
+    """Empty query string must raise ValueError before calling Voyage."""
+    voyage_client = make_mock_voyage()
 
     with pytest.raises(ValueError, match="empty"):
-        await embed_query("", openai_client)
+        await embed_query("", voyage_client)
 
-    openai_client.embeddings.create.assert_not_called()
+    voyage_client.embed.assert_not_called()
 
 
 async def test_embed_query_raises_on_whitespace_only() -> None:
     """Whitespace-only query is effectively empty -- raise ValueError."""
-    openai_client = make_mock_openai()
+    voyage_client = make_mock_voyage()
 
     with pytest.raises(ValueError, match="empty"):
-        await embed_query("   \t\n  ", openai_client)
+        await embed_query("   \t\n  ", voyage_client)
 
-    openai_client.embeddings.create.assert_not_called()
+    voyage_client.embed.assert_not_called()
 
 
 async def test_embed_query_returns_first_embedding_from_response() -> None:
-    """embed_query wraps the text in a list but returns data[0].embedding."""
-    openai_client = make_mock_openai()
+    """embed_query wraps the text in a list but returns embeddings[0]."""
+    voyage_client = make_mock_voyage()
 
-    result = await embed_query("test query", openai_client)
+    result = await embed_query("test query", voyage_client)
 
-    # We sent a list of 1 item; we get back data[0] -- a flat list of floats
+    # We sent a list of 1 item; we get back embeddings[0] -- a flat list of floats
     assert result == [0.1] * EMBEDDING_DIMENSIONS
 
 
@@ -378,23 +393,23 @@ async def test_embed_query_returns_first_embedding_from_response() -> None:
 async def test_embed_and_upsert_happy_path_returns_vector_count() -> None:
     """embed_and_upsert returns the number of vectors stored in Pinecone."""
     chunks = [make_chunk(chunk_index=i) for i in range(3)]
-    openai_client = make_mock_openai()
+    voyage_client = make_mock_voyage()
     pinecone_wrapper = make_mock_pinecone_wrapper(upsert_return=3)
 
-    count = await embed_and_upsert(chunks, openai_client, pinecone_wrapper)
+    count = await embed_and_upsert(chunks, voyage_client, pinecone_wrapper)
 
     assert count == 3
 
 
 async def test_embed_and_upsert_empty_list_returns_zero_without_api_calls() -> None:
-    """Empty chunk list -> 0 returned, neither OpenAI nor Pinecone called."""
-    openai_client = make_mock_openai()
+    """Empty chunk list -> 0 returned, neither Voyage nor Pinecone called."""
+    voyage_client = make_mock_voyage()
     pinecone_wrapper = make_mock_pinecone_wrapper(upsert_return=0)
 
-    count = await embed_and_upsert([], openai_client, pinecone_wrapper)
+    count = await embed_and_upsert([], voyage_client, pinecone_wrapper)
 
     assert count == 0
-    openai_client.embeddings.create.assert_not_called()
+    voyage_client.embed.assert_not_called()
     pinecone_wrapper.upsert_batch.assert_not_called()
 
 
@@ -403,10 +418,10 @@ async def test_embed_and_upsert_passes_all_vectors_to_pinecone() -> None:
     chunks = [
         make_chunk(paragraph_name=f"PARA-{i}", chunk_index=i) for i in range(5)
     ]
-    openai_client = make_mock_openai()
+    voyage_client = make_mock_voyage()
     pinecone_wrapper = make_mock_pinecone_wrapper(upsert_return=5)
 
-    await embed_and_upsert(chunks, openai_client, pinecone_wrapper)
+    await embed_and_upsert(chunks, voyage_client, pinecone_wrapper)
 
     call_args = pinecone_wrapper.upsert_batch.call_args
     vectors_passed = call_args.args[0]
@@ -416,10 +431,10 @@ async def test_embed_and_upsert_passes_all_vectors_to_pinecone() -> None:
 async def test_embed_and_upsert_single_chunk() -> None:
     """Single chunk flow works end-to-end."""
     chunks = [make_chunk()]
-    openai_client = make_mock_openai()
+    voyage_client = make_mock_voyage()
     pinecone_wrapper = make_mock_pinecone_wrapper(upsert_return=1)
 
-    count = await embed_and_upsert(chunks, openai_client, pinecone_wrapper)
+    count = await embed_and_upsert(chunks, voyage_client, pinecone_wrapper)
 
     assert count == 1
     pinecone_wrapper.upsert_batch.assert_called_once()
@@ -432,19 +447,19 @@ async def test_embed_and_upsert_single_chunk() -> None:
 
 def test_embedding_model_constant_is_correct_model_name() -> None:
     """The embedding model constant must match our architecture decision."""
-    assert EMBEDDING_MODEL == "text-embedding-3-small"
+    assert EMBEDDING_MODEL == "voyage-code-2"
 
 
 def test_embedding_dimensions_constant_matches_model() -> None:
-    """text-embedding-3-small outputs 1536-dimensional vectors."""
-    assert EMBEDDING_DIMENSIONS == 1536
+    """voyage-code-2 outputs 1024-dimensional vectors."""
+    assert EMBEDDING_DIMENSIONS == 1024
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# build_embedding_text -- enriched text sent to OpenAI for indexing
+# build_embedding_text -- enriched text sent to Voyage for indexing
 # ─────────────────────────────────────────────────────────────────────────────
 # Why test this separately?
-# This function controls what semantic meaning OpenAI embeds.
+# This function controls what semantic meaning Voyage embeds.
 # If it only embeds raw COBOL, natural-language queries like
 # "how is interest calculated?" can't match "COMPUTE WS-INT = WS-PRIN * RATE".
 # By prepending the file stem and readable paragraph name, we bridge the gap
@@ -544,9 +559,9 @@ def test_build_embedding_text_multi_word_paragraph_name() -> None:
 
 
 def test_embed_chunks_sends_enriched_text_not_raw_code() -> None:
-    """embed_chunks must pass enriched text (file+para+code) to OpenAI, not just code.
+    """embed_chunks must pass enriched text (file+para+code) to Voyage, not just code.
 
-    This is the critical integration test: the text OpenAI receives should
+    This is the critical integration test: the text Voyage receives should
     include the paragraph name as a semantic hint alongside the code.
     """
     chunk = make_chunk(
@@ -554,13 +569,14 @@ def test_embed_chunks_sends_enriched_text_not_raw_code() -> None:
         paragraph_name="CALCULATE-INTEREST",
         content="    COMPUTE WS-INTEREST = WS-PRINCIPAL * RATE.",
     )
-    openai_client = make_mock_openai()
+    voyage_client = make_mock_voyage()
 
     import asyncio
-    asyncio.get_event_loop().run_until_complete(embed_chunks([chunk], openai_client))
+    asyncio.get_event_loop().run_until_complete(embed_chunks([chunk], voyage_client))
 
-    call_kwargs = openai_client.embeddings.create.call_args
-    sent_texts: list[str] = call_kwargs.kwargs.get("input") or call_kwargs.args[1]
+    call_kwargs = voyage_client.embed.call_args
+    # texts is the first positional arg to voyage_client.embed(texts, model=..., input_type=...)
+    sent_texts: list[str] = call_kwargs.args[0]
     sent_text = sent_texts[0]
 
     # Must include human-readable context — not just the raw COBOL line

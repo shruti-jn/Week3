@@ -9,7 +9,7 @@
  * SSE event order from the backend:
  *   1. "snippets" — list of matching COBOL code chunks (arrives first, fast)
  *   2. "token"    — one chunk of the GPT answer (arrives many times, streaming)
- *   3. "done"     — pipeline finished, includes query_time_ms
+ *   3. "done"     — pipeline finished, includes full metrics payload
  *   OR
  *   1. "error"    — something went wrong (skips snippets/token/done)
  */
@@ -26,6 +26,40 @@ export interface CodeSnippet {
   content: string;
   /** Combined relevance score (0.0–1.0, higher = more relevant) */
   score: number;
+  /**
+   * How this chunk was split: "paragraph" means it was cut at a natural COBOL
+   * paragraph boundary; "fixed" means it was cut at a fixed line count.
+   * Paragraph chunks are usually more semantically coherent.
+   */
+  chunk_type: "paragraph" | "fixed";
+}
+
+/**
+ * Full metrics payload from the "done" SSE event.
+ *
+ * Contains timing for each pipeline step plus aggregate similarity stats.
+ * This is the same data recorded in Langfuse traces — the frontend can use
+ * it to show a metrics bar and build the session query log.
+ */
+export interface QueryMetrics {
+  /** Total end-to-end wall-clock time in milliseconds */
+  query_time_ms: number;
+  /** Time spent embedding the query with Voyage AI */
+  embed_ms: number;
+  /** Time spent querying Pinecone */
+  retrieve_ms: number;
+  /** Time spent reranking candidates */
+  rerank_ms: number;
+  /** Time spent streaming the LLM answer */
+  llm_ms: number;
+  /** Number of code snippets returned */
+  chunks_count: number;
+  /** Highest similarity score among returned snippets (0.0–1.0) */
+  top_score: number;
+  /** Mean similarity score across returned snippets (0.0–1.0) */
+  avg_similarity: number;
+  /** Number of unique source files represented in the results */
+  files_hit: number;
 }
 
 /** Callbacks invoked as SSE events arrive from the backend. */
@@ -34,8 +68,8 @@ export interface StreamCallbacks {
   onSnippets: (snippets: CodeSnippet[]) => void;
   /** Called for each streaming token of the GPT answer. */
   onToken: (token: string) => void;
-  /** Called when the full answer has been streamed. */
-  onDone: (queryTimeMs: number) => void;
+  /** Called when the full answer has been streamed, with full pipeline metrics. */
+  onDone: (metrics: QueryMetrics) => void;
   /** Called if the backend pipeline fails. */
   onError: (message: string) => void;
 }
@@ -48,8 +82,8 @@ export interface StreamCallbacks {
  *
  * @param query       - Plain-English question about the COBOL codebase
  * @param accessToken - NextAuth JWT token from session.accessToken
- * @param topK        - Max number of code snippets to retrieve (default: 5)
  * @param callbacks   - Handlers for each SSE event type
+ * @param topK        - Max number of code snippets to retrieve (default: 5)
  *
  * @throws Error if the HTTP request itself fails (network error, 401, etc.)
  */
@@ -119,8 +153,8 @@ export async function streamQuery(
           break;
         }
         case "done": {
-          const payload = JSON.parse(data) as { query_time_ms: number };
-          callbacks.onDone(payload.query_time_ms);
+          const metrics = JSON.parse(data) as QueryMetrics;
+          callbacks.onDone(metrics);
           break;
         }
         case "error": {

@@ -80,11 +80,14 @@ repos:
         name: "🐍 Python type check (mypy --strict)"
         files: ^backend/app/   # Only check the app source code, not tests
         args: ["--strict", "--ignore-missing-imports"]
-        # mypy needs these packages to understand Pydantic's special type magic
+        # mypy needs these packages to type-check code that imports them
         additional_dependencies:
           - pydantic>=2.7
           - pydantic-settings>=2.3
           - openai>=1.35
+          - voyageai>=0.3.7
+          - langfuse>=2.0
+          - types-python-jose
 
   # ── Python: Unit Tests ────────────────────────────────────────────────
   # Runs the fast unit tests (no external API calls) before every commit.

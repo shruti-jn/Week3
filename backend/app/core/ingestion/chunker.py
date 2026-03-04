@@ -386,7 +386,8 @@ def _is_comment_line(line: str) -> bool:
 
 def _is_section_header(line: str) -> bool:
     """
-    Return True if a COBOL source line is a SECTION header inside the PROCEDURE DIVISION.
+    Return True if a COBOL source line is a SECTION header inside the PROCEDURE
+    DIVISION.
 
     Many gnucobol-contrib programs use COBOL SECTIONS instead of (or alongside)
     plain paragraphs. A section looks like::

@@ -1,0 +1,107 @@
+#!/usr/bin/env bash
+# pre-commit — LegacyLens quality gates
+#
+# Runs only the checks relevant to what's actually staged:
+#   • backend/ staged → ruff lint, ruff format, mypy, pytest unit + coverage
+#   • frontend/ staged → eslint, prettier, tsc
+#
+# "Measure twice, cut once." — failing here is free; failing on Vercel costs a deploy.
+
+set -euo pipefail
+
+ROOT="$(git rev-parse --show-toplevel)"
+STAGED=$(git diff --cached --name-only)
+
+# ── Helpers ──────────────────────────────────────────────────────────────────
+
+pass() { printf "  \033[32m✓\033[0m %s\n" "$1"; }
+fail() { printf "  \033[31m✗\033[0m %s\n" "$1"; }
+section() { printf "\n\033[1m[pre-commit] %s\033[0m\n" "$1"; }
+
+# ── Backend checks ────────────────────────────────────────────────────────────
+
+if echo "$STAGED" | grep -q "^backend/"; then
+  section "Backend"
+
+  VENV="$ROOT/backend/.venv/bin"
+
+  # Ruff lint
+  if "$VENV/ruff" check "$ROOT/backend/app/" --quiet; then
+    pass "ruff lint"
+  else
+    fail "ruff lint — run: backend/.venv/bin/ruff check backend/app/"
+    exit 1
+  fi
+
+  # Ruff format
+  if "$VENV/ruff" format --check "$ROOT/backend/app/" --quiet; then
+    pass "ruff format"
+  else
+    fail "ruff format — run: backend/.venv/bin/ruff format backend/app/"
+    exit 1
+  fi
+
+  # mypy strict
+  if "$VENV/mypy" "$ROOT/backend/app/" --strict --quiet 2>&1 | grep -q "^Success:"; then
+    pass "mypy --strict"
+  else
+    "$VENV/mypy" "$ROOT/backend/app/" --strict
+    fail "mypy type errors — fix above before committing"
+    exit 1
+  fi
+
+  # Unit tests + per-file coverage (no integration tests — they need live APIs)
+  if "$VENV/pytest" -m "not integration" "$ROOT/backend/tests/unit/" \
+      --cov=app --cov-report=term-missing -q \
+      --rootdir="$ROOT/backend" \
+      --tb=short 2>&1; then
+    pass "pytest unit tests"
+  else
+    fail "tests failed — fix above before committing"
+    exit 1
+  fi
+
+  # Per-file 80% coverage gate
+  if (cd "$ROOT/backend" && bash scripts/check_coverage.sh); then
+    pass "coverage ≥ 80% per file"
+  else
+    fail "coverage below threshold — add tests for flagged files"
+    exit 1
+  fi
+fi
+
+# ── Frontend checks ───────────────────────────────────────────────────────────
+
+if echo "$STAGED" | grep -q "^frontend/"; then
+  section "Frontend"
+
+  cd "$ROOT/frontend"
+
+  # ESLint (catches react/jsx-no-comment-textnodes and friends)
+  if npm run lint --silent 2>&1; then
+    pass "eslint"
+  else
+    fail "eslint errors — run: npm --prefix frontend run lint"
+    exit 1
+  fi
+
+  # Prettier
+  if npm run format:check --silent 2>&1; then
+    pass "prettier"
+  else
+    fail "prettier — run: npm --prefix frontend run format"
+    exit 1
+  fi
+
+  # TypeScript
+  if npm run type-check --silent 2>&1; then
+    pass "tsc --noEmit"
+  else
+    fail "TypeScript errors — run: npm --prefix frontend run type-check"
+    exit 1
+  fi
+
+  cd "$ROOT"
+fi
+
+printf "\n\033[32m[pre-commit] All checks passed.\033[0m\n\n"

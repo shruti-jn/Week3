@@ -10,7 +10,11 @@
  *   $ query_cobol_codebase --index legacylens
  *   > [  input box  ]  [→ run]
  *
- *   ● PAYMNT-CALC  score: 0.91  payroll/PAYROLL.cob · lines 142–178
+ *   ── Pipeline metrics bar ──────────────────────────────────────────────
+ *   ⏱ 1.23s  ↑ 0.921  ~ 0.847  📄 2 files  # 3 chunks
+ *   embed 42ms · retrieve 180ms · rerank 3ms · llm 1005ms
+ *
+ *   ● PAYMNT-CALC  [PARA]  score: 0.91  payroll/PAYROLL.cob · lines 142–178
  *   ────────────────────────────────────────────────
  *     142 │ PAYMNT-CALC.
  *     143 │     COMPUTE WS-GROSS-PAY = ...
@@ -18,17 +22,58 @@
  *
  *   > Generating answer...
  *     The PAYMNT-CALC paragraph handles payroll calculation by...
+ *
+ *   ── Session query log (after 2+ queries) ─────────────────────────────
+ *   #  Query                    Time    Top     Avg     Files  Chunks
+ *   1  How is interest calc...  1.23s   0.921   0.847   2      3
  */
 
-import { useState, useRef, type FormEvent } from "react";
+import { useState, useRef, useEffect, type FormEvent } from "react";
 import { useSession } from "next-auth/react";
 import type { Session } from "next-auth";
 import AuthButton from "@/components/AuthButton";
-import { streamQuery, type CodeSnippet } from "@/lib/api";
+import { streamQuery, type CodeSnippet, type QueryMetrics } from "@/lib/api";
 
 /** Extends the default NextAuth session type to include our access token. */
 interface LegacySession extends Session {
   accessToken?: string;
+}
+
+/**
+ * One entry in the session query log.
+ *
+ * Persisted to localStorage so the log survives page reloads within
+ * the same browser session.
+ */
+interface QueryLogEntry {
+  id: number;
+  query: string;
+  timestamp: number;
+  metrics: QueryMetrics;
+}
+
+const SESSION_LOG_KEY = "legacylens_query_log";
+const MAX_LOG_ENTRIES = 20;
+
+// ── localStorage helpers ──────────────────────────────────────────────────────
+
+function loadQueryLog(): QueryLogEntry[] {
+  if (typeof window === "undefined") return [];
+  try {
+    const raw = localStorage.getItem(SESSION_LOG_KEY);
+    return raw ? (JSON.parse(raw) as QueryLogEntry[]) : [];
+  } catch {
+    return [];
+  }
+}
+
+function saveQueryLog(log: QueryLogEntry[]): void {
+  if (typeof window === "undefined") return;
+  try {
+    localStorage.setItem(SESSION_LOG_KEY, JSON.stringify(log));
+  } catch {
+    // localStorage quota exceeded — silently ignore
+  }
 }
 
 // ── Sub-components ────────────────────────────────────────────────────────────
@@ -72,7 +117,6 @@ function SnippetCard({
 }): React.JSX.Element {
   const [expanded, setExpanded] = useState(index === 0); // first result open by default
 
-  // Extract the paragraph name from the chunk ID or file path
   const fileName = snippet.file_path.split("/").pop() ?? snippet.file_path;
   const paragraphLines = snippet.content
     .split("\n")
@@ -80,7 +124,8 @@ function SnippetCard({
     .join(" ")
     .trim();
   const paragraphName =
-    paragraphLines.match(/^([A-Z0-9-]+)\./)?.[1] ?? fileName.replace(".cob", "").toUpperCase();
+    paragraphLines.match(/^([A-Z0-9-]+)\./)?.[1] ??
+    fileName.replace(".cob", "").toUpperCase();
 
   return (
     <div className="fade-in rounded-lg border border-terminal-border bg-terminal-surface overflow-hidden">
@@ -91,23 +136,45 @@ function SnippetCard({
         aria-expanded={expanded}
       >
         <div className="flex items-center gap-3 min-w-0">
-          <span className="text-terminal-accent font-bold text-sm flex-shrink-0">●</span>
+          <span className="text-terminal-accent font-bold text-sm flex-shrink-0">
+            ●
+          </span>
           <span className="text-terminal-text font-semibold text-sm tracking-wide truncate">
             {paragraphName}
+          </span>
+          {/* chunk_type badge */}
+          <span
+            className={`flex-shrink-0 rounded px-1.5 py-0.5 text-[10px] font-mono font-semibold uppercase tracking-wider ${
+              snippet.chunk_type === "paragraph"
+                ? "bg-terminal-accent/15 text-terminal-accent border border-terminal-accent/30"
+                : "bg-terminal-muted/15 text-terminal-muted border border-terminal-muted/30"
+            }`}
+            title={
+              snippet.chunk_type === "paragraph"
+                ? "Split at a COBOL paragraph boundary"
+                : "Fixed-size chunk (no paragraph boundary found)"
+            }
+          >
+            {snippet.chunk_type === "paragraph" ? "para" : "fixed"}
           </span>
           <span className="hidden sm:block text-terminal-muted text-xs truncate">
             {snippet.file_path}
             <span className="text-terminal-dim">
-              {" "}· lines {snippet.start_line}–{snippet.end_line}
+              {" "}
+              · lines {snippet.start_line}–{snippet.end_line}
             </span>
           </span>
         </div>
         <div className="flex items-center gap-3 flex-shrink-0 ml-3">
           <span className="text-xs font-mono">
             <span className="text-terminal-muted">score: </span>
-            <span className="text-terminal-accent">{snippet.score.toFixed(3)}</span>
+            <span className="text-terminal-accent">
+              {snippet.score.toFixed(3)}
+            </span>
           </span>
-          <span className="text-terminal-muted text-xs">{expanded ? "▲" : "▼"}</span>
+          <span className="text-terminal-muted text-xs">
+            {expanded ? "▲" : "▼"}
+          </span>
         </div>
       </button>
 
@@ -124,32 +191,140 @@ function SnippetCard({
   );
 }
 
+/**
+ * MetricsBar — compact pipeline analytics strip shown after each query.
+ *
+ * Two rows:
+ *   Row 1: total time · top score · avg similarity · files hit · chunk count
+ *   Row 2: step-level timings (embed / retrieve / rerank / llm)
+ */
+function MetricsBar({ metrics }: { metrics: QueryMetrics }): React.JSX.Element {
+  const totalSec = (metrics.query_time_ms / 1000).toFixed(2);
+
+  return (
+    <div className="fade-in rounded-lg border border-terminal-border bg-terminal-surface/60 px-4 py-3 text-xs font-mono">
+      {/* Row 1: key metrics */}
+      <div className="flex flex-wrap items-center gap-x-5 gap-y-1.5">
+        <MetricPill
+          label="total"
+          value={`${totalSec}s`}
+          highlight
+          title="End-to-end query latency"
+        />
+        <MetricPill
+          label="top score"
+          value={(metrics.top_score * 100).toFixed(1) + "%"}
+          highlight={metrics.top_score >= 0.85}
+          title="Highest similarity score among returned snippets"
+        />
+        <MetricPill
+          label="avg sim"
+          value={(metrics.avg_similarity * 100).toFixed(1) + "%"}
+          title="Mean similarity score across all returned snippets"
+        />
+        <MetricPill
+          label="files"
+          value={String(metrics.files_hit)}
+          title="Number of unique COBOL source files in results"
+        />
+        <MetricPill
+          label="chunks"
+          value={String(metrics.chunks_count)}
+          title="Number of code snippets returned"
+        />
+      </div>
+
+      {/* Row 2: step timings */}
+      <div className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-1 text-terminal-dim">
+        <StepTiming label="embed" ms={metrics.embed_ms} />
+        <span className="text-terminal-border">·</span>
+        <StepTiming label="retrieve" ms={metrics.retrieve_ms} />
+        <span className="text-terminal-border">·</span>
+        <StepTiming label="rerank" ms={metrics.rerank_ms} />
+        <span className="text-terminal-border">·</span>
+        <StepTiming label="llm" ms={metrics.llm_ms} />
+      </div>
+    </div>
+  );
+}
+
+function MetricPill({
+  label,
+  value,
+  highlight = false,
+  title,
+}: {
+  label: string;
+  value: string;
+  highlight?: boolean;
+  title?: string;
+}): React.JSX.Element {
+  return (
+    <span className="flex items-center gap-1.5" title={title}>
+      <span className="text-terminal-dim">{label}:</span>
+      <span
+        className={
+          highlight ? "text-terminal-accent font-semibold" : "text-terminal-text"
+        }
+      >
+        {value}
+      </span>
+    </span>
+  );
+}
+
+function StepTiming({
+  label,
+  ms,
+}: {
+  label: string;
+  ms: number;
+}): React.JSX.Element {
+  return (
+    <span>
+      <span className="text-terminal-dim">{label} </span>
+      <span className="text-terminal-muted">{ms.toFixed(0)}ms</span>
+    </span>
+  );
+}
+
 /** Streaming answer panel — shows GPT answer as it arrives token by token. */
 function AnswerPanel({
   answer,
   loading,
-  queryTimeMs,
+  metrics,
 }: {
   answer: string;
   loading: boolean;
-  queryTimeMs: number | null;
+  metrics: QueryMetrics | null;
 }): React.JSX.Element | null {
   if (!answer && !loading) return null;
 
   return (
     <div className="fade-in rounded-lg border border-terminal-border bg-terminal-surface p-4">
       <div className="mb-3 flex items-center gap-2">
-        <span className="text-terminal-accent text-sm font-semibold">▶ Answer</span>
+        <span className="text-terminal-accent text-sm font-semibold">
+          ▶ Answer
+        </span>
         {loading && (
           <span className="inline-flex gap-1">
-            <span className="h-1 w-1 rounded-full bg-terminal-accent animate-bounce" style={{ animationDelay: "0ms" }} />
-            <span className="h-1 w-1 rounded-full bg-terminal-accent animate-bounce" style={{ animationDelay: "150ms" }} />
-            <span className="h-1 w-1 rounded-full bg-terminal-accent animate-bounce" style={{ animationDelay: "300ms" }} />
+            <span
+              className="h-1 w-1 rounded-full bg-terminal-accent animate-bounce"
+              style={{ animationDelay: "0ms" }}
+            />
+            <span
+              className="h-1 w-1 rounded-full bg-terminal-accent animate-bounce"
+              style={{ animationDelay: "150ms" }}
+            />
+            <span
+              className="h-1 w-1 rounded-full bg-terminal-accent animate-bounce"
+              style={{ animationDelay: "300ms" }}
+            />
           </span>
         )}
-        {!loading && queryTimeMs !== null && (
+        {!loading && metrics !== null && (
           <span className="text-xs text-terminal-muted">
-            {(queryTimeMs / 1000).toFixed(2)}s
+            {(metrics.query_time_ms / 1000).toFixed(2)}s
           </span>
         )}
       </div>
@@ -161,12 +336,106 @@ function AnswerPanel({
   );
 }
 
-// ── Suggested queries ─────────────────────────────────────────────────────────
+/**
+ * SessionQueryLog — compact table of recent queries in this session.
+ *
+ * Only shown when there are 2 or more entries so it doesn't clutter
+ * the UI after a single query.
+ */
+function SessionQueryLog({
+  log,
+  onClear,
+}: {
+  log: QueryLogEntry[];
+  onClear: () => void;
+}): React.JSX.Element | null {
+  if (log.length < 2) return null;
+
+  return (
+    <div className="fade-in mt-6">
+      <div className="flex items-center justify-between mb-2">
+        <p className="text-xs text-terminal-muted font-mono">
+          {"// "}session query log ({log.length} queries)
+        </p>
+        <button
+          onClick={onClear}
+          className="text-[10px] text-terminal-dim hover:text-terminal-muted transition-colors font-mono"
+          title="Clear session log"
+        >
+          clear
+        </button>
+      </div>
+      <div className="rounded-lg border border-terminal-border bg-terminal-surface overflow-hidden">
+        <div className="overflow-x-auto">
+          <table className="w-full text-xs font-mono">
+            <thead>
+              <tr className="border-b border-terminal-border bg-terminal-bg/40">
+                <th className="px-3 py-2 text-left text-terminal-dim font-normal w-6">
+                  #
+                </th>
+                <th className="px-3 py-2 text-left text-terminal-dim font-normal">
+                  query
+                </th>
+                <th className="px-3 py-2 text-right text-terminal-dim font-normal whitespace-nowrap">
+                  time
+                </th>
+                <th className="px-3 py-2 text-right text-terminal-dim font-normal whitespace-nowrap">
+                  top
+                </th>
+                <th className="px-3 py-2 text-right text-terminal-dim font-normal whitespace-nowrap">
+                  avg
+                </th>
+                <th className="px-3 py-2 text-right text-terminal-dim font-normal whitespace-nowrap">
+                  files
+                </th>
+                <th className="px-3 py-2 text-right text-terminal-dim font-normal whitespace-nowrap">
+                  chunks
+                </th>
+              </tr>
+            </thead>
+            <tbody>
+              {log.map((entry, i) => (
+                <tr
+                  key={entry.id}
+                  className={`border-b border-terminal-border/40 last:border-0 ${
+                    i === 0 ? "bg-terminal-accent/5" : ""
+                  }`}
+                >
+                  <td className="px-3 py-2 text-terminal-dim">{entry.id}</td>
+                  <td className="px-3 py-2 text-terminal-text max-w-[200px] truncate">
+                    {entry.query}
+                  </td>
+                  <td className="px-3 py-2 text-right text-terminal-accent">
+                    {(entry.metrics.query_time_ms / 1000).toFixed(2)}s
+                  </td>
+                  <td className="px-3 py-2 text-right text-terminal-text">
+                    {(entry.metrics.top_score * 100).toFixed(0)}%
+                  </td>
+                  <td className="px-3 py-2 text-right text-terminal-muted">
+                    {(entry.metrics.avg_similarity * 100).toFixed(0)}%
+                  </td>
+                  <td className="px-3 py-2 text-right text-terminal-muted">
+                    {entry.metrics.files_hit}
+                  </td>
+                  <td className="px-3 py-2 text-right text-terminal-muted">
+                    {entry.metrics.chunks_count}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ── Suggested queries — from golden eval set, min_score ≥ 0.70 ────────────────
 const EXAMPLE_QUERIES = [
-  "How does interest calculation work?",
-  "What does the payroll calculation paragraph do?",
-  "Show me how loans are processed",
-  "Find inventory update logic",
+  "How do you sort a file in COBOL?",
+  "DES encryption algorithm implementation",
+  "How do you insert a record into a database?",
+  "Parse HTML form data in a CGI COBOL program",
 ];
 
 // ── Main page ─────────────────────────────────────────────────────────────────
@@ -180,12 +449,18 @@ export default function SearchPage(): React.JSX.Element {
   const [answer, setAnswer] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
-  const [queryTimeMs, setQueryTimeMs] = useState<number | null>(null);
+  const [metrics, setMetrics] = useState<QueryMetrics | null>(null);
   const [submittedQuery, setSubmittedQuery] = useState("");
+  const [queryLog, setQueryLog] = useState<QueryLogEntry[]>([]);
 
   // Keep a ref to the latest answer so the closure in streamQuery always
   // appends to the most recent value (avoids stale closure issue).
   const answerRef = useRef("");
+
+  // Load persisted query log from localStorage on mount
+  useEffect(() => {
+    setQueryLog(loadQueryLog());
+  }, []);
 
   const handleSubmit = async (q?: string): Promise<void> => {
     const finalQuery = (q ?? query).trim();
@@ -197,7 +472,7 @@ export default function SearchPage(): React.JSX.Element {
     setSnippets([]);
     setAnswer("");
     setError("");
-    setQueryTimeMs(null);
+    setMetrics(null);
     setSubmittedQuery(finalQuery);
     answerRef.current = "";
 
@@ -208,9 +483,23 @@ export default function SearchPage(): React.JSX.Element {
           answerRef.current += t;
           setAnswer(answerRef.current);
         },
-        onDone: (ms) => {
+        onDone: (m) => {
           setLoading(false);
-          setQueryTimeMs(ms);
+          setMetrics(m);
+
+          // Append to session query log (newest first, cap at MAX_LOG_ENTRIES)
+          setQueryLog((prev) => {
+            const nextId = prev.length > 0 ? prev[0].id + 1 : 1;
+            const entry: QueryLogEntry = {
+              id: nextId,
+              query: finalQuery,
+              timestamp: Date.now(),
+              metrics: m,
+            };
+            const updated = [entry, ...prev].slice(0, MAX_LOG_ENTRIES);
+            saveQueryLog(updated);
+            return updated;
+          });
         },
         onError: (msg) => {
           setError(msg);
@@ -232,6 +521,11 @@ export default function SearchPage(): React.JSX.Element {
   const onExampleClick = (ex: string): void => {
     setQuery(ex);
     void handleSubmit(ex);
+  };
+
+  const clearLog = (): void => {
+    setQueryLog([]);
+    saveQueryLog([]);
   };
 
   const hasResults = snippets.length > 0 || answer || loading;
@@ -264,7 +558,8 @@ export default function SearchPage(): React.JSX.Element {
               Ask anything about the COBOL codebase
             </h2>
             <p className="mt-1 text-xs text-terminal-muted">
-              Natural language → exact code snippets with file paths + line numbers
+              Natural language → exact code snippets with file paths + line
+              numbers
             </p>
           </div>
         )}
@@ -300,7 +595,7 @@ export default function SearchPage(): React.JSX.Element {
         {!hasResults && !loading && (
           <div className="mb-8 fade-in">
             <p className="mb-3 text-xs text-terminal-muted">
-              // example queries:
+              {"// example queries:"}
             </p>
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
               {EXAMPLE_QUERIES.map((ex) => (
@@ -337,13 +632,25 @@ export default function SearchPage(): React.JSX.Element {
               </span>
             </div>
 
+            {/* ── Metrics bar (shown as soon as done event arrives) ─────── */}
+            {metrics !== null && <MetricsBar metrics={metrics} />}
+
             {/* Loading state — no snippets yet */}
             {loading && snippets.length === 0 && (
               <div className="fade-in flex items-center gap-3 text-sm text-terminal-muted py-4">
                 <span className="inline-flex gap-1">
-                  <span className="h-1 w-1 rounded-full bg-terminal-accent animate-bounce" style={{ animationDelay: "0ms" }} />
-                  <span className="h-1 w-1 rounded-full bg-terminal-accent animate-bounce" style={{ animationDelay: "150ms" }} />
-                  <span className="h-1 w-1 rounded-full bg-terminal-accent animate-bounce" style={{ animationDelay: "300ms" }} />
+                  <span
+                    className="h-1 w-1 rounded-full bg-terminal-accent animate-bounce"
+                    style={{ animationDelay: "0ms" }}
+                  />
+                  <span
+                    className="h-1 w-1 rounded-full bg-terminal-accent animate-bounce"
+                    style={{ animationDelay: "150ms" }}
+                  />
+                  <span
+                    className="h-1 w-1 rounded-full bg-terminal-accent animate-bounce"
+                    style={{ animationDelay: "300ms" }}
+                  />
                 </span>
                 <span>searching codebase...</span>
               </div>
@@ -353,11 +660,17 @@ export default function SearchPage(): React.JSX.Element {
             {snippets.length > 0 && (
               <div>
                 <p className="mb-3 text-xs text-terminal-muted">
-                  // {snippets.length} snippet{snippets.length !== 1 ? "s" : ""} retrieved
+                  {"// "}
+                  {snippets.length} snippet
+                  {snippets.length !== 1 ? "s" : ""} retrieved
                 </p>
                 <div className="space-y-3">
                   {snippets.map((s, i) => (
-                    <SnippetCard key={`${s.file_path}-${s.start_line}`} snippet={s} index={i} />
+                    <SnippetCard
+                      key={`${s.file_path}-${s.start_line}`}
+                      snippet={s}
+                      index={i}
+                    />
                   ))}
                 </div>
               </div>
@@ -367,7 +680,7 @@ export default function SearchPage(): React.JSX.Element {
             {!loading && snippets.length === 0 && !error && (
               <div className="fade-in rounded border border-terminal-border bg-terminal-surface px-4 py-6 text-center">
                 <p className="text-sm text-terminal-muted">
-                  // no matching code found
+                  {"// no matching code found"}
                 </p>
                 <p className="mt-1 text-xs text-terminal-dim">
                   The codebase may not be indexed yet, or no snippets met the
@@ -380,10 +693,13 @@ export default function SearchPage(): React.JSX.Element {
             <AnswerPanel
               answer={answer}
               loading={loading}
-              queryTimeMs={queryTimeMs}
+              metrics={metrics}
             />
           </div>
         )}
+
+        {/* ── Session query log (shown after 2+ queries) ────────────────── */}
+        <SessionQueryLog log={queryLog} onClear={clearLog} />
       </main>
 
       {/* ── Footer ────────────────────────────────────────────────────────── */}
@@ -391,7 +707,7 @@ export default function SearchPage(): React.JSX.Element {
         <p className="text-center text-xs text-terminal-dim">
           LegacyLens · Gauntlet AI Week 3 ·{" "}
           <span className="text-terminal-accent">
-            gpt-4o-mini + text-embedding-3-small + pinecone
+            gpt-4o-mini + voyage-code-2 + pinecone
           </span>
         </p>
       </footer>
