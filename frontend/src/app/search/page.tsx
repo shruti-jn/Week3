@@ -161,12 +161,12 @@ function AnswerPanel({
   );
 }
 
-// ── Suggested queries ─────────────────────────────────────────────────────────
+// ── Suggested queries — from golden eval set, min_score ≥ 0.70 ────────────────
 const EXAMPLE_QUERIES = [
-  "How does interest calculation work?",
-  "What does the payroll calculation paragraph do?",
-  "Show me how loans are processed",
-  "Find inventory update logic",
+  "How do you sort a file in COBOL?",
+  "DES encryption algorithm implementation",
+  "How do you insert a record into a database?",
+  "Parse HTML form data in a CGI COBOL program",
 ];
 
 // ── Main page ─────────────────────────────────────────────────────────────────
