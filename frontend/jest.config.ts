@@ -36,10 +36,19 @@ const config: Config = {
   // Measure coverage for all source files, except:
   // - .d.ts type declaration files (no logic to test)
   // - Next.js API routes for auth (tested separately with integration tests)
+  // - Next.js Server Components (pages, layouts) — they run on the server and
+  //   can't be rendered in Jest+jsdom; they're validated by type-check + e2e tests
+  // - Next.js middleware — relies on NextAuth internals, not unit-testable
+  // - NextAuth config (auth.ts) — framework configuration, not unit-testable
   collectCoverageFrom: [
     'src/**/*.{ts,tsx}',
     '!src/**/*.d.ts',
     '!src/app/api/**',
+    '!src/app/**/page.tsx',
+    '!src/app/**/layout.tsx',
+    '!src/app/**/providers.tsx',
+    '!src/middleware.ts',
+    '!src/lib/auth.ts',
   ],
 
   // Minimum coverage thresholds — the build fails if we drop below these.
