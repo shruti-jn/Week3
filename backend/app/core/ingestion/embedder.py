@@ -15,15 +15,17 @@ Pipeline position:
     user query -> [embedder.embed_query] -> pinecone_client (query) -> reranker
 
 Public API:
-    embed_chunks()      -- batch-embed a list of COBOLChunks into ChunkVectors
-    embed_query()       -- embed a single user query string for retrieval
-    embed_and_upsert()  -- full pipeline: embed chunks then store them in Pinecone
+    build_embedding_text() -- build the enriched text string sent to OpenAI
+    embed_chunks()         -- batch-embed a list of COBOLChunks into ChunkVectors
+    embed_query()          -- embed a single user query string for retrieval
+    embed_and_upsert()     -- full pipeline: embed chunks then store them in Pinecone
 """
 
 from __future__ import annotations
 
 import asyncio
 import logging
+from pathlib import Path
 
 from openai import AsyncOpenAI
 from openai.types import CreateEmbeddingResponse
@@ -44,6 +46,121 @@ EMBEDDING_MODEL: str = "text-embedding-3-small"
 
 # Number of floats in each embedding vector. Must match the Pinecone index dimension.
 EMBEDDING_DIMENSIONS: int = 1536
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Public helpers
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+def _extract_first_comment(content: str) -> str:
+    """
+    Extract the first meaningful comment line from a COBOL chunk's content.
+
+    COBOL comments begin with *> (free-format) or * in column 7 (fixed-format).
+    This function scans the chunk content for the first non-trivial comment line
+    and returns its text, stripped of the comment marker and leading whitespace.
+
+    Used by build_embedding_text to generate the Q&A lead sentence that
+    significantly improves semantic similarity scores for natural-language queries.
+
+    Args:
+        content: Raw content of a COBOLChunk (may include COBOL code + comments).
+
+    Returns:
+        First non-trivial comment text (>= 20 chars), or empty string if none found.
+    """
+    for line in content.splitlines():
+        stripped = line.lstrip()
+        # Free-format *> comment
+        if stripped.startswith("*>"):
+            text = stripped[2:].strip()
+            if text and len(text) >= 20 and not all(c in "-=" for c in text):
+                return text
+        # Fixed-format: * at column 7 (index 6)
+        elif len(line) > 6 and line[6] == "*":
+            text = line[7:].strip()
+            if text and len(text) >= 20 and not all(c in "-=" for c in text):
+                return text
+    return ""
+
+
+def build_embedding_text(chunk: COBOLChunk) -> str:
+    """
+    Build the enriched text string sent to OpenAI when embedding a COBOL chunk.
+
+    Raw COBOL code alone is hard for a language model to match against plain-
+    English queries. "COMPUTE WS-INT = WS-PRIN * RATE" doesn't look anything
+    like "how is interest calculated?" — so cosine similarity stays very low.
+
+    For named paragraphs, this function uses a Q&A format that mirrors how users
+    actually phrase queries: "What does the CALCULATE-INTEREST paragraph do?
+    The CALCULATE-INTEREST paragraph computes the total interest charged..."
+
+    This Q&A framing works because the embedding model sees both the question
+    and the answer in the same vector space as user queries, pushing cosine
+    similarity scores well above the 0.75 relevance threshold.
+
+    For fallback chunks (no paragraph name), the format is simpler: just the
+    file context plus the raw COBOL content.
+
+    The metadata stored in Pinecone still contains the raw code — this
+    enriched text is ONLY used at embedding time, not at display time.
+
+    Args:
+        chunk: The COBOLChunk to build embedding text for.
+
+    Returns:
+        A multi-line string with Q&A framing (for named paragraphs) or
+        file context + content (for fallback chunks).
+
+    Examples:
+        Named paragraph with a first comment:
+            "What does the CALCULATE-INTEREST paragraph do?\\n"
+            "The CALCULATE-INTEREST paragraph computes the total interest...\\n"
+            "COBOL program: loan-calc\\n"
+            "Paragraph: CALCULATE-INTEREST (calculate interest)\\n"
+            "    COMPUTE WS-INTEREST = WS-PRINCIPAL * RATE."
+
+        Named paragraph without a comment:
+            "COBOL program: loan-calc\\n"
+            "Paragraph: CALCULATE-INTEREST (calculate interest)\\n"
+            "    COMPUTE WS-INTEREST = WS-PRINCIPAL * RATE."
+
+        Fallback chunk (no paragraph):
+            "COBOL program: old-payroll\\n"
+            "    MOVE WS-GROSS TO WS-PAY."
+    """
+    parts: list[str] = []
+
+    # Use just the file stem — the short name without directory or extension.
+    # "loan-calc" is semantically useful; "/Users/shruti/Week3/data/..." is noise.
+    file_stem = Path(str(chunk.file_path)).stem
+
+    if chunk.paragraph_name:
+        # Convert COBOL-HYPHEN-NAME to "cobol hyphen name" for NLP matching.
+        readable = chunk.paragraph_name.replace("-", " ").lower()
+
+        # Build Q&A lead: "What does PARA-NAME paragraph do? The PARA-NAME paragraph [description]"
+        # This format mirrors typical user queries and dramatically improves cosine
+        # similarity above the 0.75 threshold versus plain code + header embedding.
+        first_comment = _extract_first_comment(chunk.content)
+        if first_comment:
+            parts.append(
+                f"What does the {chunk.paragraph_name} paragraph do? "
+                f"The {chunk.paragraph_name} paragraph {first_comment.lower()}"
+            )
+
+        parts.append(f"COBOL program: {file_stem}")
+        parts.append(f"Paragraph: {chunk.paragraph_name} ({readable})")
+    else:
+        parts.append(f"COBOL program: {file_stem}")
+
+    # Always include the actual COBOL code — it provides specific keyword signals
+    # (COMPUTE, PERFORM, MOVE, etc.) that supplement the semantic context above.
+    parts.append(chunk.content)
+
+    return "\n".join(parts)
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -203,7 +320,10 @@ async def embed_chunks(
 
     for batch_start in range(0, len(chunks), batch_size):
         batch = chunks[batch_start : batch_start + batch_size]
-        texts = [chunk.content for chunk in batch]
+        # Use enriched text (file stem + paragraph name + code) rather than
+        # raw code alone. This bridges English queries to COBOL identifiers.
+        # See build_embedding_text() for details on why this matters.
+        texts = [build_embedding_text(chunk) for chunk in batch]
 
         logger.debug(
             "embed_chunks: embedding batch %d-%d (%d chunks)",

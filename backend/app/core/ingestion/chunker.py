@@ -232,11 +232,21 @@ def _split_by_paragraphs(file_path: Path, lines: list[str]) -> list[COBOLChunk]:
             in_procedure_division = True
             continue
 
-        # Once inside the PROCEDURE DIVISION, look for paragraph labels
-        if in_procedure_division and _is_paragraph_header(line):
-            name = stripped.rstrip(".")
-            paragraph_boundaries.append((name, i))
-            logger.debug("Found paragraph '%s' at line %d", name, i + 1)
+        # Once inside the PROCEDURE DIVISION, look for paragraph labels and
+        # COBOL SECTION headers (e.g. "CRYPT SECTION."). Both act as named
+        # chunk boundaries so that section-based COBOL files (common in
+        # gnucobol-contrib) are chunked by section rather than falling back
+        # to fixed-size windows.
+        if in_procedure_division:
+            if _is_paragraph_header(line):
+                name = stripped.rstrip(".")
+                paragraph_boundaries.append((name, i))
+                logger.debug("Found paragraph '%s' at line %d", name, i + 1)
+            elif _is_section_header(line):
+                # Extract the section name (first token, strip trailing period)
+                name = stripped.split()[0].rstrip(".")
+                paragraph_boundaries.append((name, i))
+                logger.debug("Found section '%s' at line %d", name, i + 1)
 
     if not paragraph_boundaries:
         return []
@@ -372,6 +382,55 @@ def _is_comment_line(line: str) -> bool:
     if len(line) > 6 and line[6] in ("*", "/"):
         return True
     return False
+
+
+def _is_section_header(line: str) -> bool:
+    """
+    Return True if a COBOL source line is a SECTION header inside the PROCEDURE DIVISION.
+
+    Many gnucobol-contrib programs use COBOL SECTIONS instead of (or alongside)
+    plain paragraphs. A section looks like::
+
+        CRYPT SECTION.
+        SETKEY SECTION.
+        READ-DATA SECTION.
+
+    These are two-token lines where the second token is the word SECTION (with an
+    optional trailing period). The first token must be a valid COBOL identifier.
+
+    Note: This function does NOT check whether we are inside the PROCEDURE DIVISION —
+    the caller (_split_by_paragraphs) tracks that. The function only validates the
+    syntactic form of the line.
+
+    Args:
+        line: A COBOL source line in its original form (not stripped).
+
+    Returns:
+        True if this line is a COBOL SECTION header.
+    """
+    if _is_comment_line(line):
+        return False
+
+    stripped = line.strip()
+    if not stripped:
+        return False
+
+    tokens = stripped.split()
+    # Need at least two tokens: <NAME> SECTION[.]
+    if len(tokens) < 2:
+        return False
+
+    # Second token must be SECTION (period optional)
+    second = tokens[1].upper().rstrip(".")
+    if second != "SECTION":
+        return False
+
+    # First token must be a valid COBOL identifier (uppercase letters, digits, hyphens)
+    name = tokens[0].rstrip(".")
+    if not _PARAGRAPH_NAME_RE.match(name):
+        return False
+
+    return True
 
 
 def _is_paragraph_header(line: str) -> bool:

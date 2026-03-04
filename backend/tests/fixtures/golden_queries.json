@@ -1,88 +1,89 @@
 [
   {
-    "_comment": "Golden query set — 20 developer-centric questions with known expected answers.",
-    "_comment2": "These are used to measure Precision@5: what % of queries find the right chunk in the top 5 results?",
+    "_comment": "Golden query set — queries derived from actual gnucobol-contrib content.",
+    "_comment2": "These measure Precision@5: what % of queries find the right chunk in the top 5 results?",
     "_comment3": "Target: >70% of queries should return the expected paragraph in their top 5 results.",
-    "_comment4": "Run with: pytest tests/integration/test_golden_queries.py"
+    "_comment4": "Run with: pytest tests/integration/test_golden_queries.py",
+    "_comment5": "Target codebase: data/gnucobol-contrib (real community-contributed COBOL, not custom files)"
   },
   {
     "id": "gq-001",
-    "query": "where is interest calculated?",
-    "expected_paragraph": "CALCULATE-INTEREST",
-    "expected_file_pattern": "loan",
+    "query": "file sort COBOL program",
+    "expected_paragraph": null,
+    "expected_file_pattern": "GCSORT",
     "min_score": 0.75,
-    "category": "business_logic"
+    "category": "code_explanation"
   },
   {
     "id": "gq-002",
-    "query": "how is monthly payment computed?",
-    "expected_paragraph": "CALCULATE-INTEREST",
-    "expected_file_pattern": "loan",
+    "query": "how to sort a file in COBOL",
+    "expected_paragraph": null,
+    "expected_file_pattern": "GCSORT",
     "min_score": 0.75,
-    "category": "business_logic"
+    "category": "code_explanation"
   },
   {
     "id": "gq-003",
-    "query": "where does the program display output to the user?",
-    "expected_paragraph": "DISPLAY-RESULT",
-    "expected_file_pattern": "loan",
+    "query": "DES encryption algorithm COBOL",
+    "expected_paragraph": "CRYPT",
+    "expected_file_pattern": "cobdes",
     "min_score": 0.70,
     "category": "code_explanation"
   },
   {
     "id": "gq-004",
-    "query": "what variables store financial amounts?",
-    "expected_paragraph": null,
-    "expected_file_pattern": "loan",
+    "query": "how to set up encryption keys from a password",
+    "expected_paragraph": "SETKEY",
+    "expected_file_pattern": "cobdes",
     "min_score": 0.70,
-    "category": "data_structures"
+    "category": "code_explanation"
   },
   {
     "id": "gq-005",
-    "query": "which paragraph calls DISPLAY-RESULT?",
-    "expected_paragraph": "CALCULATE-INTEREST",
-    "expected_file_pattern": "loan",
-    "min_score": 0.72,
+    "query": "database connection SQL COBOL program",
+    "expected_paragraph": "CONNECT",
+    "expected_file_pattern": "PGMOD",
+    "min_score": 0.70,
     "category": "dependency_mapping"
   },
   {
     "id": "gq-006",
-    "query": "what is the annual interest rate variable?",
-    "expected_paragraph": null,
-    "expected_file_pattern": "loan",
+    "query": "how to insert a record into a database",
+    "expected_paragraph": "INSERT-BOOK",
+    "expected_file_pattern": "PGMOD",
     "min_score": 0.70,
-    "category": "data_structures"
-  },
-  {
-    "id": "gq-007",
-    "query": "find the amortization formula",
-    "expected_paragraph": "CALCULATE-INTEREST",
-    "expected_file_pattern": "loan",
-    "min_score": 0.75,
     "category": "business_logic"
   },
   {
-    "id": "gq-008",
-    "query": "where does the program stop running?",
-    "expected_paragraph": "DISPLAY-RESULT",
-    "expected_file_pattern": "loan",
+    "id": "gq-007",
+    "query": "file upload multipart COBOL CGI",
+    "expected_paragraph": null,
+    "expected_file_pattern": "cgiupload",
     "min_score": 0.70,
+    "category": "code_explanation"
+  },
+  {
+    "id": "gq-008",
+    "query": "parse HTML form data CGI COBOL",
+    "expected_paragraph": null,
+    "expected_file_pattern": "cgiform",
+    "min_score": 0.65,
     "category": "code_explanation"
   },
   {
     "id": "gq-009",
-    "query": "how many monthly payments does the loan have?",
-    "expected_paragraph": "CALCULATE-INTEREST",
-    "expected_file_pattern": "loan",
-    "min_score": 0.72,
+    "query": "prime number test COBOL",
+    "expected_paragraph": null,
+    "expected_file_pattern": "prothtest",
+    "min_score": 0.65,
     "category": "business_logic"
   },
   {
     "id": "gq-010",
-    "query": "what does PERFORM DISPLAY-RESULT do?",
-    "expected_paragraph": "DISPLAY-RESULT",
-    "expected_file_pattern": "loan",
-    "min_score": 0.72,
-    "category": "code_explanation"
+    "query": "date calculation COBOL calendar",
+    "expected_paragraph": null,
+    "expected_file_pattern": "getdatez",
+    "min_score": 0.65,
+    "category": "business_logic"
   }
 ]

@@ -24,6 +24,7 @@ from app.core.ingestion.chunker import (
     _is_comment_line,
     _is_paragraph_header,
     _is_procedure_division_header,
+    _is_section_header,
     chunk_cobol_file,
 )
 
@@ -177,6 +178,68 @@ class TestProcedureDivisionDetection:
 
     def test_environment_division_not_procedure(self) -> None:
         assert _is_procedure_division_header("ENVIRONMENT DIVISION.") is False
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# SECTION header detection
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+class TestSectionHeaderDetection:
+    """Unit tests for _is_section_header().
+
+    COBOL sections use the pattern 'NAME SECTION.' and are common in
+    gnucobol-contrib files (e.g. 'CRYPT SECTION.', 'SETKEY SECTION.').
+    Sections act as named block boundaries just like paragraphs.
+    """
+
+    def test_basic_section_with_period(self) -> None:
+        assert _is_section_header("CRYPT SECTION.") is True
+
+    def test_section_without_period(self) -> None:
+        assert _is_section_header("CRYPT SECTION") is True
+
+    def test_section_with_leading_spaces(self) -> None:
+        assert _is_section_header(" CRYPT SECTION.") is True
+
+    def test_section_hyphenated_name(self) -> None:
+        assert _is_section_header("READ-DATA SECTION.") is True
+
+    def test_section_uppercase_only(self) -> None:
+        """Section keyword must be uppercase."""
+        assert _is_section_header("SETKEY SECTION.") is True
+
+    def test_comment_line_not_section(self) -> None:
+        assert _is_section_header("*> CRYPT SECTION.") is False
+
+    def test_procedure_division_not_section(self) -> None:
+        """PROCEDURE DIVISION uses DIVISION, not SECTION."""
+        assert _is_section_header("PROCEDURE DIVISION.") is False
+
+    def test_data_division_not_section(self) -> None:
+        assert _is_section_header("DATA DIVISION.") is False
+
+    def test_working_storage_section_not_procedure_section(self) -> None:
+        """WORKING-STORAGE SECTION is a data section, not a procedure section.
+        It IS a valid section header syntactically though — the caller filters
+        by requiring PROCEDURE DIVISION to be active first."""
+        assert _is_section_header("WORKING-STORAGE SECTION.") is True
+
+    def test_single_token_not_section(self) -> None:
+        """A bare paragraph name has only one token — not a section header."""
+        assert _is_section_header("CRYPT.") is False
+
+    def test_empty_line_not_section(self) -> None:
+        assert _is_section_header("") is False
+
+    def test_blank_line_not_section(self) -> None:
+        assert _is_section_header("   ") is False
+
+    def test_lowercase_name_not_section(self) -> None:
+        assert _is_section_header("crypt SECTION.") is False
+
+    def test_numeric_start_not_section(self) -> None:
+        assert _is_section_header("01 SECTION.") is False
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -489,3 +552,78 @@ class TestChunkCobolFile:
         last = chunks[-1]
         assert len(last.content.splitlines()) <= 50
         assert last.end_line == 450
+
+    # ── COBOL SECTION header detection ───────────────────────────────────────
+
+    def test_section_creates_named_chunk(self) -> None:
+        """'CRYPT SECTION.' should create a chunk named 'CRYPT'."""
+        content = (
+            "PROCEDURE DIVISION.\n"
+            " CRYPT SECTION.\n"
+            "    COMPUTE WS-RESULT = WS-INPUT * 2.\n"
+            " CRYPT-EX.\n"
+            "    EXIT.\n"
+        )
+        chunks = chunk_cobol_file(DUMMY_PATH, content)
+        names = [c.paragraph_name for c in chunks]
+        assert "CRYPT" in names
+
+    def test_section_chunk_contains_code(self) -> None:
+        """The CRYPT section chunk should include the code before CRYPT-EX."""
+        content = (
+            "PROCEDURE DIVISION.\n"
+            " CRYPT SECTION.\n"
+            "    COMPUTE WS-RESULT = WS-INPUT * 2.\n"
+            " CRYPT-EX.\n"
+            "    EXIT.\n"
+        )
+        chunks = chunk_cobol_file(DUMMY_PATH, content)
+        crypt_chunk = next(c for c in chunks if c.paragraph_name == "CRYPT")
+        assert "COMPUTE WS-RESULT" in crypt_chunk.content
+
+    def test_section_chunk_is_not_fallback(self) -> None:
+        """Section-based chunks must have is_fallback=False."""
+        content = (
+            "PROCEDURE DIVISION.\n"
+            " CRYPT SECTION.\n"
+            "    COMPUTE WS-RESULT = WS-INPUT * 2.\n"
+            " CRYPT-EX.\n"
+            "    EXIT.\n"
+        )
+        chunks = chunk_cobol_file(DUMMY_PATH, content)
+        crypt_chunk = next(c for c in chunks if c.paragraph_name == "CRYPT")
+        assert not crypt_chunk.is_fallback
+
+    def test_multiple_sections_produce_multiple_chunks(self) -> None:
+        """Two sections (SETKEY and CRYPT) should produce at least two named chunks."""
+        content = (
+            "PROCEDURE DIVISION.\n"
+            " SETKEY SECTION.\n"
+            "    MOVE 1 TO WS-KEY.\n"
+            " SETKEY-EX.\n"
+            "    EXIT.\n"
+            " CRYPT SECTION.\n"
+            "    COMPUTE WS-CIPHER = WS-KEY + 1.\n"
+            " CRYPT-EX.\n"
+            "    EXIT.\n"
+        )
+        chunks = chunk_cobol_file(DUMMY_PATH, content)
+        names = [c.paragraph_name for c in chunks]
+        assert "SETKEY" in names
+        assert "CRYPT" in names
+
+    def test_section_and_paragraph_mixed(self) -> None:
+        """Files with both SECTION headers and plain paragraphs should work."""
+        content = (
+            "PROCEDURE DIVISION.\n"
+            " MAIN-PARA.\n"
+            "    PERFORM CRYPT SECTION.\n"
+            " CRYPT SECTION.\n"
+            "    COMPUTE WS-RESULT = WS-INPUT * 2.\n"
+            " CRYPT-EX.\n"
+            "    EXIT.\n"
+        )
+        chunks = chunk_cobol_file(DUMMY_PATH, content)
+        names = [c.paragraph_name for c in chunks]
+        assert "MAIN-PARA" in names
+        assert "CRYPT" in names
