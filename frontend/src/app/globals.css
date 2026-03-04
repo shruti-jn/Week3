@@ -1,0 +1,146 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* ── Custom properties ─────────────────────────────────────────────────────── */
+:root {
+  --bg: #0a0a0a;
+  --surface: #111111;
+  --border: #1f1f1f;
+  --border-bright: #2d2d2d;
+  --accent: #00ff88;
+  --accent-dim: #00cc6a;
+  --accent-dark: #003d21;
+  --text: #e2e8f0;
+  --text-muted: #6b7280;
+  --text-dim: #374151;
+  --error: #ff4444;
+}
+
+/* ── Base styles ────────────────────────────────────────────────────────────── */
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  height: 100%;
+  background-color: var(--bg);
+  color: var(--text);
+  font-family: "JetBrains Mono", "Fira Code", "Cascadia Code", Menlo, Monaco,
+    Consolas, "Liberation Mono", "Courier New", monospace;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+/* ── Scrollbar ──────────────────────────────────────────────────────────────── */
+::-webkit-scrollbar {
+  width: 4px;
+  height: 4px;
+}
+::-webkit-scrollbar-track {
+  background: var(--bg);
+}
+::-webkit-scrollbar-thumb {
+  background: var(--border-bright);
+  border-radius: 2px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: var(--text-dim);
+}
+
+/* ── Animations ─────────────────────────────────────────────────────────────── */
+@keyframes blink {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0;
+  }
+}
+
+@keyframes scanline {
+  0% {
+    transform: translateY(-100%);
+  }
+  100% {
+    transform: translateY(100vh);
+  }
+}
+
+@keyframes fadeIn {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+/* ── Utility classes ────────────────────────────────────────────────────────── */
+.cursor-blink::after {
+  content: "█";
+  color: var(--accent);
+  animation: blink 1s step-end infinite;
+  margin-left: 1px;
+}
+
+.accent-glow {
+  box-shadow: 0 0 20px rgba(0, 255, 136, 0.2), 0 0 40px rgba(0, 255, 136, 0.08);
+}
+
+.accent-glow-sm {
+  box-shadow: 0 0 8px rgba(0, 255, 136, 0.2);
+}
+
+.terminal-text {
+  color: var(--accent);
+  text-shadow: 0 0 8px rgba(0, 255, 136, 0.4);
+}
+
+.fade-in {
+  animation: fadeIn 0.3s ease-out;
+}
+
+/* Subtle horizontal scan line overlay */
+.scanlines::before {
+  content: "";
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  background: repeating-linear-gradient(
+    0deg,
+    transparent,
+    transparent 3px,
+    rgba(0, 255, 136, 0.015) 3px,
+    rgba(0, 255, 136, 0.015) 4px
+  );
+  z-index: 1000;
+}
+
+/* Code block styling */
+.code-block {
+  font-size: 0.8125rem;
+  line-height: 1.6;
+  color: #a9b7c6;
+  background: #0d1117;
+  border: 1px solid var(--border);
+}
+
+.code-line-number {
+  color: var(--text-dim);
+  user-select: none;
+  min-width: 3.5rem;
+  text-align: right;
+  padding-right: 1rem;
+  border-right: 1px solid var(--border);
+  margin-right: 1rem;
+}
+
+/* Input focus ring override */
+input:focus {
+  outline: none;
+}
