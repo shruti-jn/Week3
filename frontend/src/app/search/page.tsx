@@ -31,6 +31,8 @@
 import { useState, useRef, useEffect, useCallback, type FormEvent } from 'react'
 import { useSession } from 'next-auth/react'
 import type { Session } from 'next-auth'
+import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter'
+import { vscDarkPlus } from 'react-syntax-highlighter/dist/cjs/styles/prism'
 import AuthButton from '@/components/AuthButton'
 import {
   streamQuery,
@@ -93,23 +95,32 @@ function CodeBlock({
   content: string
   startLine: number
 }): React.JSX.Element {
-  const lines = content.split('\n')
   return (
     <div className="code-block overflow-x-auto rounded-b">
-      <table className="w-full border-collapse">
-        <tbody>
-          {lines.map((line, i) => (
-            <tr key={i} className="hover:bg-white/5">
-              <td className="code-line-number select-none px-3 py-0.5 text-right text-xs">
-                {startLine + i}
-              </td>
-              <td className="px-3 py-0.5 text-xs">
-                <pre className="whitespace-pre font-mono">{line || ' '}</pre>
-              </td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
+      <SyntaxHighlighter
+        language="cobol"
+        style={vscDarkPlus}
+        showLineNumbers
+        lineNumberStart={startLine}
+        wrapLongLines
+        lineNumberStyle={{
+          color: 'var(--terminal-dim)',
+          minWidth: '2.75rem',
+          paddingRight: '1rem',
+          textAlign: 'right',
+          userSelect: 'none',
+          fontSize: '0.75rem',
+        }}
+        customStyle={{
+          margin: 0,
+          padding: '0.75rem',
+          background: 'transparent',
+          fontSize: '0.75rem',
+          borderRadius: 0,
+        }}
+      >
+        {content}
+      </SyntaxHighlighter>
     </div>
   )
 }
@@ -929,6 +940,17 @@ export default function SearchPage(): React.JSX.Element {
     saveQueryLog([])
   }
 
+  /** Reset all query state back to the clean initial view. */
+  const handleClear = (): void => {
+    setQuery('')
+    setSnippets([])
+    setAnswer('')
+    setError('')
+    setMetrics(null)
+    setSubmittedQuery('')
+    answerRef.current = ''
+  }
+
   /**
    * handleViewFile — triggered when the user clicks "view file" on a SnippetCard.
    *
@@ -1046,10 +1068,20 @@ export default function SearchPage(): React.JSX.Element {
         {/* ── Results section ───────────────────────────────────────────── */}
         {hasResults && (
           <div className="space-y-4">
-            {/* Query echo */}
-            <div className="fade-in mb-2 text-xs text-terminal-muted">
-              <span className="text-terminal-accent">$</span> query:{' '}
-              <span className="text-terminal-text">&quot;{submittedQuery}&quot;</span>
+            {/* Query echo + new search button */}
+            <div className="fade-in mb-2 flex items-center justify-between text-xs text-terminal-muted">
+              <div>
+                <span className="text-terminal-accent">$</span> query:{' '}
+                <span className="text-terminal-text">&quot;{submittedQuery}&quot;</span>
+              </div>
+              <button
+                onClick={handleClear}
+                disabled={loading}
+                className="rounded border border-terminal-border px-2 py-0.5 font-mono text-[10px] text-terminal-dim transition-colors hover:border-terminal-accent hover:text-terminal-accent disabled:opacity-30"
+                title="Clear results and start a new search"
+              >
+                ↩ new search
+              </button>
             </div>
 
             {/* ── Metrics bar (shown as soon as done event arrives) ─────── */}
