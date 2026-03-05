@@ -92,7 +92,7 @@ class Settings(BaseSettings):
     # These control how the RAG pipeline behaves.
     # Higher top_k = more candidates to rerank = slightly slower but better results
     retrieval_top_k: int = Field(
-        default=10,
+        default=5,
         description="Number of chunks to retrieve from Pinecone before reranking",
     )
     # Minimum similarity score to consider a chunk "relevant enough" to answer from.

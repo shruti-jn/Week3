@@ -1,0 +1,52 @@
+name: Golden Eval
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [dev, main]
+  schedule:
+    # Run nightly at 06:00 UTC so eval history is continuous.
+    - cron: "0 6 * * *"
+
+jobs:
+  golden-eval:
+    name: "📊 Golden Query Evaluation"
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: backend
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: backend/pyproject.toml
+
+      - name: Install backend dependencies
+        run: pip install -e ".[dev]"
+
+      - name: Run golden eval
+        env:
+          VOYAGE_API_KEY: ${{ secrets.VOYAGE_API_KEY }}
+          PINECONE_API_KEY: ${{ secrets.PINECONE_API_KEY }}
+          PINECONE_INDEX_NAME: ${{ secrets.PINECONE_INDEX_NAME }}
+        run: |
+          python scripts/evaluate.py \
+            --output eval_results/ci_latest.json \
+            --markdown-output eval_results/ci_summary.md
+
+      - name: Publish markdown summary
+        run: cat eval_results/ci_summary.md >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload eval artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: golden-eval-report
+          path: |
+            backend/eval_results/ci_latest.json
+            backend/eval_results/ci_summary.md
