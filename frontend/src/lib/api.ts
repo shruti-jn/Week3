@@ -141,7 +141,7 @@ export async function streamQuery(
 
       for (const line of eventBlock.split('\n')) {
         if (line.startsWith('event: ')) eventType = line.slice(7).trim()
-        if (line.startsWith('data: ')) data = line.slice(6).trim()
+        if (line.startsWith('data: ')) data = line.slice(6) // preserve leading spaces in tokens
       }
 
       if (!eventType || !data) continue
