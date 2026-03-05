@@ -451,8 +451,8 @@ def test_embedding_model_constant_is_correct_model_name() -> None:
 
 
 def test_embedding_dimensions_constant_matches_model() -> None:
-    """voyage-code-2 outputs 1024-dimensional vectors."""
-    assert EMBEDDING_DIMENSIONS == 1024
+    """voyage-code-2 outputs 1536-dimensional vectors."""
+    assert EMBEDDING_DIMENSIONS == 1536
 
 
 # ─────────────────────────────────────────────────────────────────────────────

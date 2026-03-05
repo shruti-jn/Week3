@@ -35,7 +35,7 @@ export default function AuthButton({ className }: AuthButtonProps): React.JSX.El
     return (
       <div className={className}>
         <button
-          onClick={() => void signIn('github', { callbackUrl: '/search' })}
+          onClick={() => void signIn('github')}
           className="accent-glow-sm inline-flex w-full items-center justify-center gap-3 rounded border border-terminal-border bg-terminal-bg px-4 py-2.5 text-sm font-medium text-terminal-text transition-all duration-150 hover:border-terminal-accent hover:text-terminal-accent focus:outline-none focus:ring-1 focus:ring-terminal-accent"
           aria-label="Sign in with GitHub"
         >

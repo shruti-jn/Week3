@@ -28,11 +28,18 @@
  *   1  How is interest calc...  1.23s   0.921   0.847   2      3
  */
 
-import { useState, useRef, useEffect, type FormEvent } from 'react'
+import { useState, useRef, useEffect, useCallback, type FormEvent } from 'react'
 import { useSession } from 'next-auth/react'
 import type { Session } from 'next-auth'
 import AuthButton from '@/components/AuthButton'
-import { streamQuery, type CodeSnippet, type QueryMetrics } from '@/lib/api'
+import {
+  streamQuery,
+  callFeature,
+  fetchFile,
+  type CodeSnippet,
+  type QueryMetrics,
+  type FileContent,
+} from '@/lib/api'
 
 /** Extends the default NextAuth session type to include our access token. */
 interface LegacySession extends Session {
@@ -54,8 +61,6 @@ interface QueryLogEntry {
 
 const SESSION_LOG_KEY = 'legacylens_query_log'
 const MAX_LOG_ENTRIES = 20
-const CODEBASE_LABEL = process.env.NEXT_PUBLIC_CODEBASE_LABEL ?? 'OpenCOBOL Contrib'
-const CODEBASE_INDEX = process.env.NEXT_PUBLIC_CODEBASE_INDEX ?? 'legacylens'
 
 // ── localStorage helpers ──────────────────────────────────────────────────────
 
@@ -113,29 +118,96 @@ function CodeBlock({
 function SnippetCard({
   snippet,
   index,
+  accessToken,
+  onViewFile,
 }: {
   snippet: CodeSnippet
   index: number
+  /** JWT token for authenticated feature API calls. */
+  accessToken: string
+  /** Called when the user clicks "View Full File" — triggers the FileModal. */
+  onViewFile: (snippet: CodeSnippet) => void
 }): React.JSX.Element {
   const [expanded, setExpanded] = useState(index === 0) // first result open by default
+  const [activeFeature, setActiveFeature] = useState<FeatureType | null>(null)
+  const [featureResult, setFeatureResult] = useState<FeatureResult | null>(null)
+  const [featureLoading, setFeatureLoading] = useState(false)
+  const [featureError, setFeatureError] = useState('')
 
   const fileName = snippet.file_path.split('/').pop() ?? snippet.file_path
-  const paragraphLines = snippet.content.split('\n').slice(0, 2).join(' ').trim()
-  const paragraphName =
-    paragraphLines.match(/^([A-Z0-9-]+)\./)?.[1] ?? fileName.replace('.cob', '').toUpperCase()
+  // Prefer the API-supplied paragraph_name; fall back to regex extraction for display
+  const displayName =
+    snippet.paragraph_name ||
+    snippet.content
+      .split('\n')
+      .slice(0, 2)
+      .join(' ')
+      .trim()
+      .match(/^([A-Z0-9-]+)\./)?.[1] ||
+    fileName.replace('.cob', '').toUpperCase()
+
+  const handleFeature = useCallback(
+    async (feature: FeatureType): Promise<void> => {
+      // Toggle off if same button clicked again
+      if (activeFeature === feature && featureResult !== null) {
+        setActiveFeature(null)
+        setFeatureResult(null)
+        return
+      }
+
+      setActiveFeature(feature)
+      setFeatureLoading(true)
+      setFeatureError('')
+      setFeatureResult(null)
+
+      try {
+        const body: Record<string, string> =
+          feature === 'business-logic'
+            ? { file_path: snippet.file_path }
+            : { file_path: snippet.file_path, paragraph_name: snippet.paragraph_name }
+
+        if (feature === 'explain') {
+          const data = await callFeature<ExplainResponse>(feature, body, accessToken)
+          setFeatureResult({ type: 'explain', data })
+        } else if (feature === 'dependencies') {
+          const data = await callFeature<DependenciesResponse>(feature, body, accessToken)
+          setFeatureResult({ type: 'dependencies', data })
+        } else if (feature === 'business-logic') {
+          const data = await callFeature<BusinessLogicResponse>(feature, body, accessToken)
+          setFeatureResult({ type: 'business-logic', data })
+        } else {
+          const data = await callFeature<ImpactResponse>(feature, body, accessToken)
+          setFeatureResult({ type: 'impact', data })
+        }
+      } catch (err) {
+        setFeatureError(err instanceof Error ? err.message : 'Feature call failed')
+      } finally {
+        setFeatureLoading(false)
+      }
+    },
+    [activeFeature, featureResult, snippet, accessToken]
+  )
+
+  const FEATURE_BUTTONS: { id: FeatureType; label: string; title: string }[] = [
+    { id: 'explain', label: 'Explain', title: 'Plain-English explanation of this paragraph' },
+    { id: 'dependencies', label: 'Dependencies', title: 'PERFORM call graph (calls / called-by)' },
+    { id: 'business-logic', label: 'Business Logic', title: 'Business rules encoded in this file' },
+    { id: 'impact', label: 'Impact', title: 'Which paragraphs break if this one changes' },
+  ]
 
   return (
     <div className="fade-in overflow-hidden rounded-lg border border-terminal-border bg-terminal-surface">
       {/* Card header */}
-      <button
-        onClick={() => setExpanded((v) => !v)}
-        className="flex w-full items-center justify-between px-4 py-3 text-left transition-colors hover:bg-white/5"
-        aria-expanded={expanded}
-      >
-        <div className="flex min-w-0 items-center gap-3">
+      <div className="flex w-full items-center justify-between px-4 py-3 transition-colors hover:bg-white/5">
+        {/* Left: toggle + name + badges */}
+        <button
+          onClick={() => setExpanded((v) => !v)}
+          className="flex min-w-0 flex-1 items-center gap-3 text-left"
+          aria-expanded={expanded}
+        >
           <span className="flex-shrink-0 text-sm font-bold text-terminal-accent">●</span>
           <span className="truncate text-sm font-semibold tracking-wide text-terminal-text">
-            {paragraphName}
+            {displayName}
           </span>
           {/* chunk_type badge */}
           <span
@@ -159,23 +231,88 @@ function SnippetCard({
               · lines {snippet.start_line}–{snippet.end_line}
             </span>
           </span>
-        </div>
+        </button>
+
+        {/* Right: score + view file + expand */}
         <div className="ml-3 flex flex-shrink-0 items-center gap-3">
           <span className="font-mono text-xs">
             <span className="text-terminal-muted">score: </span>
             <span className="text-terminal-accent">{snippet.score.toFixed(3)}</span>
           </span>
-          <span className="text-xs text-terminal-muted">{expanded ? '▲' : '▼'}</span>
+          {/* View Full File button */}
+          <button
+            onClick={(e) => {
+              e.stopPropagation()
+              onViewFile(snippet)
+            }}
+            className="hidden rounded border border-terminal-border px-2 py-0.5 font-mono text-[10px] text-terminal-dim transition-colors hover:border-terminal-accent hover:text-terminal-accent sm:block"
+            title="View full COBOL source file"
+          >
+            view file
+          </button>
+          <button
+            onClick={() => setExpanded((v) => !v)}
+            className="text-xs text-terminal-muted"
+            aria-label={expanded ? 'Collapse' : 'Expand'}
+          >
+            {expanded ? '▲' : '▼'}
+          </button>
         </div>
-      </button>
+      </div>
 
       {/* File path on mobile */}
-      <div className="truncate px-4 pb-2 text-xs text-terminal-muted sm:hidden">
-        {snippet.file_path} · lines {snippet.start_line}–{snippet.end_line}
+      <div className="flex items-center justify-between px-4 pb-1 text-xs text-terminal-muted sm:hidden">
+        <span className="truncate">
+          {snippet.file_path} · lines {snippet.start_line}–{snippet.end_line}
+        </span>
+        <button
+          onClick={() => onViewFile(snippet)}
+          className="ml-2 flex-shrink-0 font-mono text-[10px] text-terminal-dim transition-colors hover:text-terminal-accent"
+        >
+          view file
+        </button>
       </div>
 
       {/* Code body */}
-      {expanded && <CodeBlock content={snippet.content} startLine={snippet.start_line} />}
+      {expanded && (
+        <>
+          <CodeBlock content={snippet.content} startLine={snippet.start_line} />
+
+          {/* Feature tabs — only for paragraph chunks with a known name */}
+          {snippet.paragraph_name && (
+            <div className="border-t border-terminal-border">
+              {/* Button row */}
+              <div className="flex flex-wrap gap-1.5 bg-terminal-bg/40 px-4 py-2.5">
+                {FEATURE_BUTTONS.map(({ id, label, title }) => (
+                  <button
+                    key={id}
+                    onClick={() => void handleFeature(id)}
+                    disabled={featureLoading && activeFeature !== id}
+                    title={title}
+                    className={`rounded border px-2.5 py-1 font-mono text-[10px] font-medium transition-colors ${
+                      activeFeature === id
+                        ? 'border-terminal-accent bg-terminal-accent/10 text-terminal-accent'
+                        : 'border-terminal-border text-terminal-muted hover:border-terminal-accent hover:text-terminal-accent'
+                    } disabled:opacity-40`}
+                  >
+                    {featureLoading && activeFeature === id ? '···' : label}
+                  </button>
+                ))}
+              </div>
+
+              {/* Feature error */}
+              {featureError && (
+                <div className="border-t border-terminal-border px-4 py-2 font-mono text-xs text-terminal-error">
+                  error: {featureError}
+                </div>
+              )}
+
+              {/* Feature result */}
+              {featureResult && !featureLoading && <FeaturePanel result={featureResult} />}
+            </div>
+          )}
+        </>
+      )}
     </div>
   )
 }
@@ -403,6 +540,255 @@ function SessionQueryLog({
   )
 }
 
+// ── Feature response types ────────────────────────────────────────────────────
+
+/** Shape returned by POST /api/v1/explain */
+interface ExplainResponse {
+  paragraph_name: string
+  explanation: string
+}
+
+/** Shape returned by POST /api/v1/dependencies */
+interface DependenciesResponse {
+  paragraph_name: string
+  calls: string[]
+  called_by: string[]
+}
+
+/** Shape returned by POST /api/v1/business-logic */
+interface BusinessLogicResponse {
+  file_path: string
+  rules: string[]
+}
+
+/** Shape returned by POST /api/v1/impact */
+interface ImpactResponse {
+  paragraph_name: string
+  affected_paragraphs: string[]
+}
+
+type FeatureType = 'explain' | 'dependencies' | 'business-logic' | 'impact'
+type FeatureResult =
+  | { type: 'explain'; data: ExplainResponse }
+  | { type: 'dependencies'; data: DependenciesResponse }
+  | { type: 'business-logic'; data: BusinessLogicResponse }
+  | { type: 'impact'; data: ImpactResponse }
+
+// ── FeaturePanel — renders the result of a code-understanding feature call ────
+
+/**
+ * FeaturePanel — displays the result of one of the four LLM-powered features.
+ *
+ * Renders inside an expanded SnippetCard below the code block. The visual
+ * style matches the terminal theme: dark background, monospace font, green
+ * accents for the feature name, bullet-point lists for multi-item results.
+ */
+function FeaturePanel({ result }: { result: FeatureResult }): React.JSX.Element {
+  if (result.type === 'explain') {
+    return (
+      <div className="border-t border-terminal-border bg-terminal-bg/60 px-4 py-3 text-xs">
+        <p className="mb-1 font-mono font-semibold text-terminal-accent">
+          {'// '}explain: {result.data.paragraph_name}
+        </p>
+        <p className="whitespace-pre-wrap leading-relaxed text-terminal-text">
+          {result.data.explanation}
+        </p>
+      </div>
+    )
+  }
+
+  if (result.type === 'dependencies') {
+    return (
+      <div className="border-t border-terminal-border bg-terminal-bg/60 px-4 py-3 font-mono text-xs">
+        <p className="mb-2 font-semibold text-terminal-accent">
+          {'// '}dependencies: {result.data.paragraph_name}
+        </p>
+        <div className="grid grid-cols-2 gap-4">
+          <div>
+            <p className="mb-1 text-terminal-dim">calls (PERFORM):</p>
+            {result.data.calls.length === 0 ? (
+              <p className="italic text-terminal-muted">none</p>
+            ) : (
+              <ul className="space-y-0.5">
+                {result.data.calls.map((p) => (
+                  <li key={p} className="text-terminal-text">
+                    → {p}
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
+          <div>
+            <p className="mb-1 text-terminal-dim">called by:</p>
+            {result.data.called_by.length === 0 ? (
+              <p className="italic text-terminal-muted">none</p>
+            ) : (
+              <ul className="space-y-0.5">
+                {result.data.called_by.map((p) => (
+                  <li key={p} className="text-terminal-text">
+                    ← {p}
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
+        </div>
+      </div>
+    )
+  }
+
+  if (result.type === 'business-logic') {
+    return (
+      <div className="border-t border-terminal-border bg-terminal-bg/60 px-4 py-3 font-mono text-xs">
+        <p className="mb-2 font-semibold text-terminal-accent">{'// '}business rules</p>
+        {result.data.rules.length === 0 ? (
+          <p className="italic text-terminal-muted">No business rules found.</p>
+        ) : (
+          <ul className="space-y-1">
+            {result.data.rules.map((rule, i) => (
+              <li key={i} className="flex gap-2 text-terminal-text">
+                <span className="flex-shrink-0 text-terminal-accent">•</span>
+                <span>{rule}</span>
+              </li>
+            ))}
+          </ul>
+        )}
+      </div>
+    )
+  }
+
+  // impact
+  return (
+    <div className="border-t border-terminal-border bg-terminal-bg/60 px-4 py-3 font-mono text-xs">
+      <p className="mb-2 font-semibold text-terminal-accent">
+        {'// '}impact: if {result.data.paragraph_name} changes
+      </p>
+      {result.data.affected_paragraphs.length === 0 ? (
+        <p className="italic text-terminal-muted">No affected paragraphs.</p>
+      ) : (
+        <ul className="space-y-0.5">
+          {result.data.affected_paragraphs.map((p) => (
+            <li key={p} className="text-terminal-text">
+              ⚠ {p}
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
+  )
+}
+
+// ── FileModal — full COBOL source view with matched paragraph highlighted ──────
+
+/**
+ * FileModal — displays the full raw COBOL source for a file in an overlay.
+ *
+ * Opens when the user clicks "View Full File" on a SnippetCard. Shows the
+ * complete file with line numbers and scrolls to + highlights the matched
+ * paragraph (the lines from snippet.start_line to snippet.end_line).
+ *
+ * @param fileContent - The fetched file content and metadata
+ * @param snippet     - The matched snippet so we know which lines to highlight
+ * @param onClose     - Callback to close the modal
+ */
+function FileModal({
+  fileContent,
+  snippet,
+  onClose,
+}: {
+  fileContent: FileContent
+  snippet: CodeSnippet
+  onClose: () => void
+}): React.JSX.Element {
+  const highlightRef = useRef<HTMLTableRowElement>(null)
+
+  // Scroll to highlighted paragraph as soon as the modal mounts
+  useEffect(() => {
+    highlightRef.current?.scrollIntoView({ block: 'center', behavior: 'smooth' })
+  }, [])
+
+  const lines = fileContent.content.split('\n')
+  const fileName = fileContent.file_path.split('/').pop() ?? fileContent.file_path
+
+  return (
+    /* Overlay */
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/75 p-4"
+      onClick={(e) => {
+        // Close on backdrop click only
+        if (e.target === e.currentTarget) onClose()
+      }}
+    >
+      {/* Modal panel */}
+      <div
+        className="relative flex flex-col rounded-lg border border-terminal-border bg-terminal-surface"
+        style={{ width: '90vw', height: '85vh' }}
+      >
+        {/* Header */}
+        <div className="flex flex-shrink-0 items-center justify-between border-b border-terminal-border px-4 py-3">
+          <div className="flex min-w-0 items-center gap-3">
+            <span className="text-sm font-semibold text-terminal-accent">📄</span>
+            <span className="truncate font-mono text-sm font-semibold text-terminal-text">
+              {fileName}
+            </span>
+            <span className="font-mono text-xs text-terminal-dim">
+              {fileContent.line_count} lines
+            </span>
+            {snippet.paragraph_name && (
+              <span className="hidden truncate font-mono text-xs text-terminal-muted sm:block">
+                · highlighted:{' '}
+                <span className="text-terminal-accent">{snippet.paragraph_name}</span> (lines{' '}
+                {snippet.start_line}–{snippet.end_line})
+              </span>
+            )}
+          </div>
+          <button
+            onClick={onClose}
+            className="ml-3 flex-shrink-0 rounded border border-terminal-border px-2 py-1 text-xs text-terminal-muted transition-colors hover:border-terminal-accent hover:text-terminal-accent"
+            aria-label="Close file view"
+          >
+            ✕ close
+          </button>
+        </div>
+
+        {/* File content — scrollable */}
+        <div className="flex-1 overflow-y-auto">
+          <table className="w-full border-collapse font-mono text-xs">
+            <tbody>
+              {lines.map((line, i) => {
+                const lineNum = i + 1
+                const isHighlighted = lineNum >= snippet.start_line && lineNum <= snippet.end_line
+                return (
+                  <tr
+                    key={lineNum}
+                    ref={isHighlighted && lineNum === snippet.start_line ? highlightRef : undefined}
+                    className={
+                      isHighlighted
+                        ? 'border-l-2 border-terminal-accent bg-terminal-accent/10'
+                        : 'hover:bg-white/5'
+                    }
+                  >
+                    <td className="w-12 select-none border-r border-terminal-border/30 px-3 py-0.5 text-right text-terminal-dim">
+                      {lineNum}
+                    </td>
+                    <td className="px-3 py-0.5">
+                      <pre
+                        className={`whitespace-pre ${isHighlighted ? 'text-terminal-text' : 'text-terminal-muted'}`}
+                      >
+                        {line || ' '}
+                      </pre>
+                    </td>
+                  </tr>
+                )
+              })}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  )
+}
+
 // ── Suggested queries — from golden eval set, min_score ≥ 0.70 ────────────────
 const EXAMPLE_QUERIES = [
   'How do you sort a file in COBOL?',
@@ -425,6 +811,20 @@ export default function SearchPage(): React.JSX.Element {
   const [metrics, setMetrics] = useState<QueryMetrics | null>(null)
   const [submittedQuery, setSubmittedQuery] = useState('')
   const [queryLog, setQueryLog] = useState<QueryLogEntry[]>([])
+
+  /**
+   * openFile — state for the FileModal overlay.
+   *
+   * null means the modal is closed. When set, it holds:
+   *   - snippet: the card that triggered "View Full File" (for line highlighting)
+   *   - content: the fetched FileContent (null while loading)
+   *   - loading: true while the /file request is in-flight
+   */
+  const [openFile, setOpenFile] = useState<{
+    snippet: CodeSnippet
+    content: FileContent | null
+    loading: boolean
+  } | null>(null)
 
   // Keep a ref to the latest answer so the closure in streamQuery always
   // appends to the most recent value (avoids stale closure issue).
@@ -501,6 +901,32 @@ export default function SearchPage(): React.JSX.Element {
     saveQueryLog([])
   }
 
+  /**
+   * handleViewFile — triggered when the user clicks "view file" on a SnippetCard.
+   *
+   * Opens the FileModal immediately in a loading state, then fires the /file
+   * request. On success the modal shows the full source with the matched
+   * paragraph highlighted; on failure an error toast replaces the spinner.
+   */
+  const handleViewFile = useCallback(
+    async (snippet: CodeSnippet): Promise<void> => {
+      const token = session?.accessToken ?? ''
+      // Show the modal right away with a loading indicator
+      setOpenFile({ snippet, content: null, loading: true })
+      try {
+        const content = await fetchFile(snippet.file_path, token)
+        setOpenFile({ snippet, content, loading: false })
+      } catch (err) {
+        // Close the modal and surface the error in the main error banner
+        setOpenFile(null)
+        setError(
+          err instanceof Error ? `Failed to load file: ${err.message}` : 'Failed to load file'
+        )
+      }
+    },
+    [session]
+  )
+
   const hasResults = snippets.length > 0 || answer || loading
 
   return (
@@ -524,8 +950,8 @@ export default function SearchPage(): React.JSX.Element {
         {!hasResults && (
           <div className="fade-in mb-6">
             <div className="mb-1 text-sm text-terminal-muted">
-              <span className="text-terminal-accent">$</span> query_cobol_codebase --index{' '}
-              {CODEBASE_INDEX}
+              <span className="text-terminal-accent">$</span> query_cobol_codebase --index
+              legacylens
             </div>
             <h2 className="text-lg font-semibold text-terminal-text">
               Ask anything about the COBOL codebase
@@ -538,10 +964,6 @@ export default function SearchPage(): React.JSX.Element {
 
         {/* ── Query input ────────────────────────────────────────────────── */}
         <form onSubmit={onFormSubmit} className="mb-6">
-          <p className="mb-2 text-xs text-terminal-muted">
-            {'// '}querying codebase: <span className="text-terminal-accent">{CODEBASE_LABEL}</span>
-            <span className="text-terminal-dim"> (index: {CODEBASE_INDEX})</span>
-          </p>
           <div className="focus-within:accent-glow-sm flex items-center gap-2 rounded-lg border border-terminal-border bg-terminal-surface px-3 py-2 transition-all focus-within:border-terminal-accent">
             <span className="flex-shrink-0 select-none text-sm font-bold text-terminal-accent">
               {'>'}
@@ -622,7 +1044,7 @@ export default function SearchPage(): React.JSX.Element {
                     style={{ animationDelay: '300ms' }}
                   />
                 </span>
-                <span>searching {CODEBASE_LABEL}...</span>
+                <span>searching codebase...</span>
               </div>
             )}
 
@@ -636,7 +1058,13 @@ export default function SearchPage(): React.JSX.Element {
                 </p>
                 <div className="space-y-3">
                   {snippets.map((s, i) => (
-                    <SnippetCard key={`${s.file_path}-${s.start_line}`} snippet={s} index={i} />
+                    <SnippetCard
+                      key={`${s.file_path}-${s.start_line}`}
+                      snippet={s}
+                      index={i}
+                      accessToken={session?.accessToken ?? ''}
+                      onViewFile={(snippet) => void handleViewFile(snippet)}
+                    />
                   ))}
                 </div>
               </div>
@@ -660,6 +1088,35 @@ export default function SearchPage(): React.JSX.Element {
         {/* ── Session query log (shown after 2+ queries) ────────────────── */}
         <SessionQueryLog log={queryLog} onClear={clearLog} />
       </main>
+
+      {/* ── FileModal overlay ─────────────────────────────────────────────── */}
+      {openFile !== null &&
+        (openFile.loading ? (
+          /* Loading state — dim overlay with spinner while /file fetches */
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/75">
+            <div className="flex flex-col items-center gap-3">
+              <span className="inline-flex gap-1.5">
+                {[0, 150, 300].map((delay) => (
+                  <span
+                    key={delay}
+                    className="h-2 w-2 animate-bounce rounded-full bg-terminal-accent"
+                    style={{ animationDelay: `${delay}ms` }}
+                  />
+                ))}
+              </span>
+              <p className="font-mono text-xs text-terminal-muted">
+                loading {openFile.snippet.file_path.split('/').pop()}…
+              </p>
+            </div>
+          </div>
+        ) : openFile.content !== null ? (
+          /* Loaded — show the full file with matched paragraph highlighted */
+          <FileModal
+            fileContent={openFile.content}
+            snippet={openFile.snippet}
+            onClose={() => setOpenFile(null)}
+          />
+        ) : null)}
 
       {/* ── Footer ────────────────────────────────────────────────────────── */}
       <footer className="border-t border-terminal-border px-4 py-2">

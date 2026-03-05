@@ -7,16 +7,8 @@
  */
 
 import AuthButton from '@/components/AuthButton'
-import { authOptions } from '@/lib/auth'
-import { getServerSession } from 'next-auth'
-import { redirect } from 'next/navigation'
 
-export default async function LoginPage(): Promise<React.JSX.Element> {
-  const session = await getServerSession(authOptions)
-  if (session) {
-    redirect('/search')
-  }
-
+export default function LoginPage(): React.JSX.Element {
   return (
     <main className="flex min-h-screen items-center justify-center px-4">
       <div className="w-full max-w-sm">

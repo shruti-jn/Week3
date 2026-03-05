@@ -32,6 +32,12 @@ export interface CodeSnippet {
    * Paragraph chunks are usually more semantically coherent.
    */
   chunk_type: 'paragraph' | 'fixed'
+  /**
+   * COBOL paragraph name (e.g., "CALCULATE-INTEREST").
+   * Empty string for fixed-size fallback chunks that have no paragraph label.
+   * Non-empty means the feature buttons (Explain, Dependencies, etc.) will work.
+   */
+  paragraph_name: string
 }
 
 /**
@@ -135,15 +141,14 @@ export async function streamQuery(
 
       for (const line of eventBlock.split('\n')) {
         if (line.startsWith('event: ')) eventType = line.slice(7).trim()
-        // Preserve token spacing exactly as streamed by backend/LLM.
-        // Trimming here causes words to collapse in the Answer panel.
-        if (line.startsWith('data: ')) data = line.slice(6)
+        if (line.startsWith('data: ')) data = line.slice(6).trim()
       }
 
-      if (!eventType) continue
+      if (!eventType || !data) continue
 
       switch (eventType) {
         case 'snippets': {
+          // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
           const snippets = JSON.parse(data) as CodeSnippet[]
           callbacks.onSnippets(snippets)
           break
@@ -155,11 +160,13 @@ export async function streamQuery(
           break
         }
         case 'done': {
+          // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
           const metrics = JSON.parse(data) as QueryMetrics
           callbacks.onDone(metrics)
           break
         }
         case 'error': {
+          // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
           const payload = JSON.parse(data) as { message: string }
           callbacks.onError(payload.message ?? 'Unknown error')
           break
@@ -167,4 +174,84 @@ export async function streamQuery(
       }
     }
   }
+}
+
+/**
+ * callFeature — sends a POST to one of the four code-understanding feature
+ * endpoints and returns the parsed JSON response.
+ *
+ * Unlike streamQuery, the feature endpoints return a single JSON object
+ * (not SSE) — they wait for the full GPT-4o-mini reply before responding.
+ *
+ * @param endpoint    - The endpoint path after /api/v1/ (e.g. "explain")
+ * @param body        - Request body (file_path, paragraph_name, etc.)
+ * @param accessToken - NextAuth JWT token for Bearer auth
+ *
+ * @throws Error if the HTTP request fails (network error, 4xx, 5xx)
+ */
+export async function callFeature<T>(
+  endpoint: string,
+  body: Record<string, string>,
+  accessToken: string
+): Promise<T> {
+  const apiUrl = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:8000'
+
+  const response = await fetch(`${apiUrl}/api/v1/${endpoint}`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${accessToken}`,
+    },
+    body: JSON.stringify(body),
+  })
+
+  if (!response.ok) {
+    const text = await response.text().catch(() => '')
+    throw new Error(`HTTP ${response.status}: ${text || response.statusText}`)
+  }
+
+  return response.json() as Promise<T>
+}
+
+/**
+ * FileContent — the shape returned by the /file endpoint.
+ *
+ * Contains the full raw COBOL source text plus the line count so the
+ * FileModal can show line numbers and scroll to the matched paragraph.
+ */
+export interface FileContent {
+  /** Stored Pinecone path (same as CodeSnippet.file_path) */
+  file_path: string
+  /** Full raw COBOL source — one newline-delimited string */
+  content: string
+  /** Total lines in the file (used for line-number display) */
+  line_count: number
+}
+
+/**
+ * fetchFile — fetches the full raw COBOL source for one file from the backend.
+ *
+ * The backend proxies the request to GitHub raw content so the frontend
+ * never makes cross-origin requests to GitHub directly.
+ *
+ * @param filePath    - The file_path as stored in Pinecone metadata
+ * @param accessToken - NextAuth JWT token for Bearer auth
+ *
+ * @throws Error if the HTTP request fails (404 if file not found on GitHub)
+ */
+export async function fetchFile(filePath: string, accessToken: string): Promise<FileContent> {
+  const apiUrl = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:8000'
+
+  const response = await fetch(`${apiUrl}/api/v1/file?path=${encodeURIComponent(filePath)}`, {
+    headers: {
+      Authorization: `Bearer ${accessToken}`,
+    },
+  })
+
+  if (!response.ok) {
+    const text = await response.text().catch(() => '')
+    throw new Error(`HTTP ${response.status}: ${text || response.statusText}`)
+  }
+
+  return response.json() as Promise<FileContent>
 }
