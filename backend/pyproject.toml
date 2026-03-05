@@ -142,6 +142,13 @@ module = [
 ]
 ignore_errors = true
 
+# pydantic-settings Settings() constructor pattern: older mypy versions flag this as
+# missing required args (it reads from env vars at runtime, not from constructor params).
+# Disabling warn_unused_ignores here lets the type: ignore survive both mypy versions.
+[[tool.mypy.overrides]]
+module = ["app.config"]
+warn_unused_ignores = false
+
 
 # ─────────────────────────────────────────────
 # Pytest — Test Configuration

@@ -69,6 +69,13 @@ class CodeSnippet(BaseModel):
             'Chunking strategy: "paragraph" = COBOL boundary, "fixed" = line count.'
         ),
     )
+    paragraph_name: str = Field(
+        default="",
+        description=(
+            "COBOL paragraph label (e.g. CALCULATE-INTEREST). "
+            "Empty string for fixed-size fallback chunks."
+        ),
+    )
 
     def model_post_init(self, __context: object) -> None:
         """
@@ -205,3 +212,33 @@ class ImpactResponse(BaseModel):
     message: str = Field(..., min_length=1, description="Human-readable status detail.")
     paragraph_name: str = Field(..., min_length=1, description="COBOL paragraph label.")
     affected_paragraphs: list[str] = Field(default_factory=list)
+
+
+class FileResponse(BaseModel):
+    """
+    Response body for GET /api/v1/file — Full File Context viewer.
+
+    Returns the raw COBOL source text for a file so the frontend can render
+    a full-file modal with the matched paragraph highlighted.
+
+    The file is fetched from GitHub raw content at request time (no local disk
+    required) so this works identically on localhost and on Railway.
+    """
+
+    file_path: str = Field(
+        ...,
+        min_length=1,
+        description=(
+            "Absolute or relative path identifying the file (as stored in Pinecone)."
+        ),
+    )
+    content: str = Field(
+        ...,
+        min_length=1,
+        description="Full raw COBOL source text of the file.",
+    )
+    line_count: int = Field(
+        ...,
+        ge=1,
+        description="Total number of lines in the file.",
+    )
