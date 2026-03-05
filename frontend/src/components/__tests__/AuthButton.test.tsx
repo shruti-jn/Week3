@@ -27,7 +27,7 @@ describe('AuthButton', () => {
 
   // ── Loading state ────────────────────────────────────────────────────────
 
-  it('renders nothing when status is loading', () => {
+  it('renders loading skeleton when status is loading', () => {
     mockUseSession.mockReturnValue({
       data: null,
       status: 'loading',
@@ -35,7 +35,7 @@ describe('AuthButton', () => {
     })
 
     const { container } = render(<AuthButton />)
-    expect(container.firstChild).toBeNull()
+    expect(container.firstChild).toHaveClass('animate-pulse')
   })
 
   // ── Unauthenticated state ────────────────────────────────────────────────
@@ -51,7 +51,7 @@ describe('AuthButton', () => {
     expect(screen.getByRole('button', { name: /sign in with github/i })).toBeInTheDocument()
   })
 
-  it("calls signIn('github') when sign-in button is clicked", () => {
+  it("calls signIn('github') with search callback when clicked", () => {
     mockUseSession.mockReturnValue({
       data: null,
       status: 'unauthenticated',
@@ -62,7 +62,7 @@ describe('AuthButton', () => {
     render(<AuthButton />)
     fireEvent.click(screen.getByRole('button', { name: /sign in with github/i }))
 
-    expect(mockSignIn).toHaveBeenCalledWith('github')
+    expect(mockSignIn).toHaveBeenCalledWith('github', { callbackUrl: '/search' })
   })
 
   // ── Authenticated state ──────────────────────────────────────────────────
@@ -96,7 +96,7 @@ describe('AuthButton', () => {
     expect(screen.getByText('bob@example.com')).toBeInTheDocument()
   })
 
-  it("falls back to 'User' when neither name nor email is available", () => {
+  it("falls back to 'user' when neither name nor email is available", () => {
     mockUseSession.mockReturnValue({
       data: {
         user: { name: null, email: null },
@@ -107,7 +107,7 @@ describe('AuthButton', () => {
     })
 
     render(<AuthButton />)
-    expect(screen.getByText('User')).toBeInTheDocument()
+    expect(screen.getByText('user')).toBeInTheDocument()
   })
 
   it('calls signOut with /login callback when sign-out button is clicked', () => {
