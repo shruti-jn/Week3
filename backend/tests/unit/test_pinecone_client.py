@@ -12,7 +12,7 @@ Think of these tests as verifying the "plumbing" that connects our
 application logic to the Pinecone vector database.
 """
 
-from unittest.mock import MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
@@ -386,7 +386,7 @@ async def test_upsert_succeeds_after_transient_failure(
     upsert_batch retries on a single transient error and eventually succeeds.
 
     Simulates a 429 rate-limit on the first call, then success on the second.
-    time.sleep is patched so the test runs instantly with no real delay.
+    asyncio.sleep is patched so the test runs instantly with no real delay.
     """
     index_mock = mock_pinecone_client.Index.return_value
     # Fail once, then succeed
@@ -396,7 +396,7 @@ async def test_upsert_succeeds_after_transient_failure(
 
     wrapper = PineconeWrapper(client=mock_pinecone_client, index_name="test")
 
-    with patch("app.core.retrieval.pinecone_client.time.sleep"):
+    with patch("app.core.retrieval.pinecone_client.asyncio.sleep", new_callable=AsyncMock):
         count = await wrapper.upsert_batch(sample_vectors[:1])
 
     assert count == 1
@@ -419,7 +419,7 @@ async def test_upsert_raises_after_all_retries_exhausted(
 
     wrapper = PineconeWrapper(client=mock_pinecone_client, index_name="test")
 
-    with patch("app.core.retrieval.pinecone_client.time.sleep"):
+    with patch("app.core.retrieval.pinecone_client.asyncio.sleep", new_callable=AsyncMock):
         with pytest.raises(RuntimeError, match="Pinecone upsert failed"):
             await wrapper.upsert_batch(sample_vectors[:1])
 
@@ -435,7 +435,7 @@ async def test_query_succeeds_after_transient_failure(
     query() retries on a single transient error and eventually succeeds.
 
     First call raises a transient exception; second call returns the
-    standard mock response. time.sleep is patched to avoid real delays.
+    standard mock response. asyncio.sleep is patched to avoid real delays.
     """
     index_mock = mock_pinecone_client.Index.return_value
     original_query = index_mock.query
@@ -454,7 +454,7 @@ async def test_query_succeeds_after_transient_failure(
 
     wrapper = PineconeWrapper(client=mock_pinecone_client, index_name="test")
 
-    with patch("app.core.retrieval.pinecone_client.time.sleep"):
+    with patch("app.core.retrieval.pinecone_client.asyncio.sleep", new_callable=AsyncMock):
         results = await wrapper.query(
             embedding=sample_embedding, top_k=5, min_score=0.70
         )
@@ -479,7 +479,7 @@ async def test_query_raises_after_all_retries_exhausted(
 
     wrapper = PineconeWrapper(client=mock_pinecone_client, index_name="test")
 
-    with patch("app.core.retrieval.pinecone_client.time.sleep"):
+    with patch("app.core.retrieval.pinecone_client.asyncio.sleep", new_callable=AsyncMock):
         with pytest.raises(RuntimeError, match="Pinecone query failed"):
             await wrapper.query(
                 embedding=sample_embedding, top_k=5, min_score=0.75
