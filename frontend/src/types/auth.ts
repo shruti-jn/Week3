@@ -10,36 +10,36 @@
  * generates this JWT and we pass it in the Authorization header.
  */
 
-import type { DefaultSession, DefaultUser } from "next-auth";
-import type { DefaultJWT } from "next-auth/jwt";
+import type { DefaultSession, DefaultUser } from 'next-auth'
+import type { DefaultJWT } from 'next-auth/jwt'
 
-declare module "next-auth" {
+declare module 'next-auth' {
   /**
    * Extends the built-in Session type to include the access token.
    * This is what useSession() returns in Client Components.
    */
   interface Session extends DefaultSession {
     /** The NextAuth JWT, used to authenticate API calls to FastAPI. */
-    accessToken?: string;
+    accessToken?: string
     user: {
       /** GitHub user ID (e.g., "github-12345") — the sub claim in the JWT. */
-      id?: string;
-    } & DefaultSession["user"];
+      id?: string
+    } & DefaultSession['user']
   }
 
   /**
    * Extends the built-in User type returned after OAuth sign-in.
    */
   interface User extends DefaultUser {
-    id: string;
+    id: string
   }
 }
 
-declare module "next-auth/jwt" {
+declare module 'next-auth/jwt' {
   /**
    * Extends the built-in JWT type to carry the sub (user ID).
    */
   interface JWT extends DefaultJWT {
-    sub?: string;
+    sub?: string
   }
 }

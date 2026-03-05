@@ -1,4 +1,4 @@
-"use client";
+'use client'
 
 /**
  * QueryInput — The search bar that lets users type a COBOL question.
@@ -13,22 +13,22 @@
  *                    so the user knows a search is already in progress.
  */
 
-import { useState } from "react";
+import { useState } from 'react'
 
 interface QueryInputProps {
-  onSubmit: (query: string) => void;
-  isLoading: boolean;
+  onSubmit: (query: string) => void
+  isLoading: boolean
 }
 
-export function QueryInput({ onSubmit, isLoading }: QueryInputProps) {
-  const [value, setValue] = useState("");
+export function QueryInput({ onSubmit, isLoading }: QueryInputProps): React.JSX.Element {
+  const [value, setValue] = useState('')
 
-  function handleSubmit(event: React.FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    const trimmed = value.trim();
+  function handleSubmit(event: React.FormEvent<HTMLFormElement>): void {
+    event.preventDefault()
+    const trimmed = value.trim()
     // Block submission if the query is blank or a search is already running
-    if (!trimmed || isLoading) return;
-    onSubmit(trimmed);
+    if (!trimmed || isLoading) return
+    onSubmit(trimmed)
   }
 
   return (
@@ -45,8 +45,8 @@ export function QueryInput({ onSubmit, isLoading }: QueryInputProps) {
         disabled={isLoading}
         className="mt-2 rounded bg-blue-600 px-6 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-50"
       >
-        {isLoading ? "Searching..." : "Search"}
+        {isLoading ? 'Searching...' : 'Search'}
       </button>
     </form>
-  );
+  )
 }

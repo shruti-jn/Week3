@@ -1,4 +1,4 @@
-"use client";
+'use client'
 
 /**
  * ResultCard — Displays one COBOL code snippet from the search results.
@@ -12,18 +12,18 @@
  *                  "#2", etc. so the user can see how confident the system is.
  */
 
-import { Prism as SyntaxHighlighter } from "react-syntax-highlighter";
-import { vscDarkPlus } from "react-syntax-highlighter/dist/cjs/styles/prism";
-import type { CodeSnippet } from "../types/api";
+import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter'
+import { vscDarkPlus } from 'react-syntax-highlighter/dist/cjs/styles/prism'
+import type { CodeSnippet } from '../types/api'
 
 interface ResultCardProps {
-  snippet: CodeSnippet;
-  rank: number;
+  snippet: CodeSnippet
+  rank: number
 }
 
-export function ResultCard({ snippet, rank }: ResultCardProps) {
+export function ResultCard({ snippet, rank }: ResultCardProps): React.JSX.Element {
   // Convert 0.0–1.0 cosine score to a whole-number percentage (e.g. 0.91 → 91)
-  const scorePercent = Math.round(snippet.score * 100);
+  const scorePercent = Math.round(snippet.score * 100)
 
   return (
     <div className="rounded border border-gray-200 bg-white p-4 shadow-sm">
@@ -36,19 +36,17 @@ export function ResultCard({ snippet, rank }: ResultCardProps) {
         <span className="text-gray-500">
           Lines {snippet.start_line}–{snippet.end_line}
         </span>
-        <span className="rounded bg-green-100 px-2 py-0.5 text-green-800">
-          {scorePercent}%
-        </span>
+        <span className="rounded bg-green-100 px-2 py-0.5 text-green-800">{scorePercent}%</span>
       </div>
 
       {/* COBOL source code with syntax highlighting */}
       <SyntaxHighlighter
         language="cobol"
         style={vscDarkPlus}
-        customStyle={{ margin: 0, borderRadius: "0.375rem", fontSize: "0.75rem" }}
+        customStyle={{ margin: 0, borderRadius: '0.375rem', fontSize: '0.75rem' }}
       >
         {snippet.content}
       </SyntaxHighlighter>
     </div>
-  );
+  )
 }

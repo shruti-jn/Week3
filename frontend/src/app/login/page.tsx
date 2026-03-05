@@ -6,7 +6,7 @@
  * "developer tool" immediately — no marketing fluff.
  */
 
-import AuthButton from "@/components/AuthButton";
+import AuthButton from '@/components/AuthButton'
 
 export default function LoginPage(): React.JSX.Element {
   return (
@@ -17,16 +17,14 @@ export default function LoginPage(): React.JSX.Element {
           <span className="h-3 w-3 rounded-full bg-[#ff5f56] opacity-80" />
           <span className="h-3 w-3 rounded-full bg-[#ffbd2e] opacity-80" />
           <span className="h-3 w-3 rounded-full bg-terminal-accent opacity-80" />
-          <span className="ml-2 text-xs text-terminal-muted">
-            legacylens — bash
-          </span>
+          <span className="ml-2 text-xs text-terminal-muted">legacylens — bash</span>
         </div>
 
         {/* Main card */}
-        <div className="rounded-lg border border-terminal-border bg-terminal-surface p-8 accent-glow">
+        <div className="accent-glow rounded-lg border border-terminal-border bg-terminal-surface p-8">
           {/* Logo / wordmark */}
           <div className="mb-8">
-            <h1 className="cursor-blink text-2xl font-semibold tracking-tight terminal-text">
+            <h1 className="cursor-blink terminal-text text-2xl font-semibold tracking-tight">
               LegacyLens
             </h1>
             <p className="mt-2 text-sm text-terminal-muted">
@@ -37,22 +35,20 @@ export default function LoginPage(): React.JSX.Element {
           {/* System info block */}
           <div className="mb-6 space-y-1 rounded border border-terminal-border bg-terminal-bg px-3 py-2 text-xs text-terminal-muted">
             <div>
-              <span className="text-terminal-accent">$</span>{" "}
+              <span className="text-terminal-accent">$</span>{' '}
               <span>legacylens --version 0.1.0</span>
             </div>
             <div>
-              <span className="text-terminal-accent">→</span>{" "}
+              <span className="text-terminal-accent">→</span>{' '}
               <span>vector index: legacylens (pinecone)</span>
             </div>
             <div>
-              <span className="text-terminal-accent">→</span>{" "}
+              <span className="text-terminal-accent">→</span>{' '}
               <span>model: gpt-4o-mini · text-embedding-3-small</span>
             </div>
             <div>
-              <span className="text-terminal-accent">→</span>{" "}
-              <span className="text-terminal-accent">
-                auth required — connect with GitHub
-              </span>
+              <span className="text-terminal-accent">→</span>{' '}
+              <span className="text-terminal-accent">auth required — connect with GitHub</span>
             </div>
           </div>
 
@@ -67,9 +63,9 @@ export default function LoginPage(): React.JSX.Element {
 
         {/* Below card hint */}
         <p className="mt-4 text-center text-xs text-terminal-dim">
-          {"// Gauntlet AI Week 3 · RAG-powered COBOL Intelligence"}
+          {'// Gauntlet AI Week 3 · RAG-powered COBOL Intelligence'}
         </p>
       </div>
     </main>
-  );
+  )
 }

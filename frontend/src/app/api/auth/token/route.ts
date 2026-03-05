@@ -24,8 +24,8 @@
  *   });
  */
 
-import { getToken } from "next-auth/jwt";
-import { type NextRequest, NextResponse } from "next/server";
+import { getToken } from 'next-auth/jwt'
+import { type NextRequest, NextResponse } from 'next/server'
 
 export async function GET(req: NextRequest): Promise<NextResponse> {
   // `raw: true` returns the JWT as a signed string (what FastAPI needs).
@@ -34,11 +34,11 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
     req,
     secret: process.env.NEXTAUTH_SECRET,
     raw: true,
-  });
+  })
 
   if (!rawToken) {
-    return NextResponse.json({ error: "Not authenticated" }, { status: 401 });
+    return NextResponse.json({ error: 'Not authenticated' }, { status: 401 })
   }
 
-  return NextResponse.json({ token: rawToken });
+  return NextResponse.json({ token: rawToken })
 }

@@ -15,22 +15,22 @@
  * - If invalid or missing, it redirects to the signIn page (defined in authOptions)
  */
 
-import { withAuth } from "next-auth/middleware";
+import { withAuth } from 'next-auth/middleware'
 
 // In development, allow unauthenticated access to /search for demo purposes.
 // Re-enable auth protection before deploying to production.
-const isDev = process.env.NODE_ENV === "development";
+const isDev = process.env.NODE_ENV === 'development'
 
 export default isDev
   ? // eslint-disable-next-line @typescript-eslint/explicit-function-return-type
     function devMiddleware() {
-      return; // pass-through — no auth check in dev
+      return // pass-through — no auth check in dev
     }
   : withAuth({
       pages: {
-        signIn: "/login",
+        signIn: '/login',
       },
-    });
+    })
 
 /**
  * matcher controls which routes the middleware runs on.
@@ -45,7 +45,5 @@ export default isDev
  *   - /favicon.ico — browser tab icon
  */
 export const config = {
-  matcher: [
-    "/((?!login|api/auth|_next/static|_next/image|favicon.ico).*)",
-  ],
-};
+  matcher: ['/((?!login|api/auth|_next/static|_next/image|favicon.ico).*)'],
+}

@@ -16,14 +16,14 @@
  * NextAuth v4 wraps them in a single handler that we export as both.
  */
 
-import NextAuth from "next-auth";
+import NextAuth from 'next-auth'
 
-import { authOptions } from "@/lib/auth";
+import { authOptions } from '@/lib/auth'
 
 // Create the NextAuth handler with our auth configuration
-const handler = NextAuth(authOptions);
+const handler = NextAuth(authOptions)
 
 // Export as both GET and POST since NextAuth needs both
 // - GET: for fetching session info, sign-in page, etc.
 // - POST: for sign-in/sign-out actions with CSRF token
-export { handler as GET, handler as POST };
+export { handler as GET, handler as POST }

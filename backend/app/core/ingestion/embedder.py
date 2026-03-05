@@ -52,8 +52,8 @@ logger = logging.getLogger(__name__)
 EMBEDDING_MODEL: str = "voyage-code-2"
 
 # Number of floats in each embedding vector. Must match the Pinecone index dimension.
-# voyage-code-2 outputs 1024-dimensional vectors (vs 1536 for text-embedding-3-small).
-EMBEDDING_DIMENSIONS: int = 1024
+# voyage-code-2 outputs 1536-dimensional vectors (same as text-embedding-3-small).
+EMBEDDING_DIMENSIONS: int = 1536
 
 
 # ─────────────────────────────────────────────────────────────────────────────

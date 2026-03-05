@@ -1,4 +1,4 @@
-"use client";
+'use client'
 
 /**
  * AnswerDisplay — Shows the GPT-4o-mini generated answer to a COBOL query.
@@ -18,12 +18,16 @@
  */
 
 interface AnswerDisplayProps {
-  answer: string;
-  isLoading: boolean;
-  queryTimeMs?: number;
+  answer: string
+  isLoading: boolean
+  queryTimeMs?: number
 }
 
-export function AnswerDisplay({ answer, isLoading, queryTimeMs }: AnswerDisplayProps) {
+export function AnswerDisplay({
+  answer,
+  isLoading,
+  queryTimeMs,
+}: AnswerDisplayProps): React.JSX.Element | null {
   if (isLoading) {
     return (
       <div
@@ -35,11 +39,11 @@ export function AnswerDisplay({ answer, isLoading, queryTimeMs }: AnswerDisplayP
         <div className="h-4 w-3/4 animate-pulse rounded bg-gray-300" />
         <div className="mt-2 h-4 w-1/2 animate-pulse rounded bg-gray-300" />
       </div>
-    );
+    )
   }
 
   if (!answer) {
-    return null;
+    return null
   }
 
   return (
@@ -48,9 +52,7 @@ export function AnswerDisplay({ answer, isLoading, queryTimeMs }: AnswerDisplayP
       <p className="whitespace-pre-wrap text-sm text-gray-800">{answer}</p>
 
       {/* Query timing badge — only shown when the caller provides a value */}
-      {queryTimeMs !== undefined && (
-        <p className="mt-2 text-xs text-gray-500">{queryTimeMs} ms</p>
-      )}
+      {queryTimeMs !== undefined && <p className="mt-2 text-xs text-gray-500">{queryTimeMs} ms</p>}
     </div>
-  );
+  )
 }
