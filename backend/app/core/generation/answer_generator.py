@@ -225,7 +225,7 @@ async def generate_answer(
             model=ANSWER_MODEL,
             messages=messages,  # type: ignore[arg-type]  # TypedDict vs dict[str, str]
             temperature=0.1,  # Low temperature: factual, citation-focused answers
-            max_tokens=150,  # Cap at 150 tokens — fits citation answers (target < 3s)
+            max_tokens=100,  # Cap at 100 tokens — citation answers fit in ~50-80 tokens
             stream=True,
         ),
     )
