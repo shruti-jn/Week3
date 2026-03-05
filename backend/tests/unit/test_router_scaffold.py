@@ -1,9 +1,9 @@
 """
-Unit tests for the API v1 router scaffold endpoints.
+Unit tests for the API v1 router endpoints.
 
 These tests verify that:
-- Each stub endpoint accepts correctly shaped input
-- Each stub endpoint returns correctly shaped output
+- Each endpoint accepts correctly shaped input
+- Each endpoint returns correctly shaped output
 - Invalid input is rejected with 422 (validation error), not 500
 - Protected endpoints return 401 when no auth token is provided
 - The /health endpoint responds correctly
@@ -11,11 +11,28 @@ These tests verify that:
 We use the `test_client` fixture from conftest.py which already wires up
 the FastAPI app with mocked OpenAI, Pinecone, and auth dependencies.
 
+For the code-understanding feature endpoints (/explain, /dependencies,
+/business-logic, /impact), the feature functions are patched at the router
+level so these tests verify routing + schema validation without making
+GitHub or OpenAI calls.
+
 No real API calls are made — all external services are mocked.
 """
 
+from unittest.mock import AsyncMock, patch
+
 import pytest
 from httpx import ASGITransport, AsyncClient
+
+from app.models.responses import (
+    BusinessLogicResponse,
+    DependenciesResponse,
+    ExplainResponse,
+    ImpactResponse,
+)
+
+# Valid gnucobol-contrib path used across feature endpoint tests
+_VALID_PATH = "/data/gnucobol-contrib/payroll/PAYROLL.cob"
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Health check
@@ -110,19 +127,30 @@ async def test_query_stub_whitespace_only_rejected(test_client: AsyncClient) -> 
 
 
 @pytest.mark.asyncio
-async def test_explain_stub_valid_input(test_client: AsyncClient) -> None:
-    """Explain endpoint with valid input returns stub with paragraph name echoed."""
-    response = await test_client.post(
-        "/api/v1/explain",
-        json={
-            "file_path": "samples/payroll.cob",
-            "paragraph_name": "CALC-GROSS-PAY",
-        },
+async def test_explain_endpoint_valid_input(test_client: AsyncClient) -> None:
+    """Explain endpoint calls explain_paragraph and returns its response."""
+    mock_response = ExplainResponse(
+        status="ok",
+        message="ok",
+        paragraph_name="CALC-GROSS-PAY",
+        explanation="This paragraph calculates gross pay.",
     )
+    with patch(
+        "app.api.v1.router.explain_paragraph",
+        new=AsyncMock(return_value=mock_response),
+    ):
+        response = await test_client.post(
+            "/api/v1/explain",
+            json={
+                "file_path": _VALID_PATH,
+                "paragraph_name": "CALC-GROSS-PAY",
+            },
+        )
     assert response.status_code == 200
     data = response.json()
-    assert data["status"] == "stub"
+    assert data["status"] == "ok"
     assert data["paragraph_name"] == "CALC-GROSS-PAY"
+    assert data["explanation"] == "This paragraph calculates gross pay."
 
 
 @pytest.mark.asyncio
@@ -141,20 +169,30 @@ async def test_explain_stub_missing_fields_rejected(test_client: AsyncClient) ->
 
 
 @pytest.mark.asyncio
-async def test_dependencies_stub_valid_input(test_client: AsyncClient) -> None:
-    """Dependencies endpoint with valid input returns stub response."""
-    response = await test_client.post(
-        "/api/v1/dependencies",
-        json={
-            "file_path": "samples/payroll.cob",
-            "paragraph_name": "CALC-NET-PAY",
-        },
+async def test_dependencies_endpoint_valid_input(test_client: AsyncClient) -> None:
+    """Dependencies endpoint calls map_dependencies and returns its response."""
+    mock_response = DependenciesResponse(
+        status="ok",
+        message="ok",
+        paragraph_name="CALC-NET-PAY",
+        calls=["COMPUTE-DEDUCTIONS"],
+        called_by=["PROCESS-EMPLOYEE"],
     )
+    with patch(
+        "app.api.v1.router.map_dependencies",
+        new=AsyncMock(return_value=mock_response),
+    ):
+        response = await test_client.post(
+            "/api/v1/dependencies",
+            json={
+                "file_path": _VALID_PATH,
+                "paragraph_name": "CALC-NET-PAY",
+            },
+        )
     assert response.status_code == 200
     data = response.json()
-    assert data["status"] == "stub"
-    assert data["calls"] == []
-    assert data["called_by"] == []
+    assert data["status"] == "ok"
+    assert "COMPUTE-DEDUCTIONS" in data["calls"]
 
 
 @pytest.mark.asyncio
@@ -175,17 +213,26 @@ async def test_dependencies_stub_missing_field_rejected(
 
 
 @pytest.mark.asyncio
-async def test_business_logic_stub_valid_input(test_client: AsyncClient) -> None:
-    """Business logic endpoint returns stub with file_path echoed."""
-    response = await test_client.post(
-        "/api/v1/business-logic",
-        json={"file_path": "samples/loans.cob"},
+async def test_business_logic_endpoint_valid_input(test_client: AsyncClient) -> None:
+    """Business logic endpoint calls extract_business_logic and returns its response."""
+    mock_response = BusinessLogicResponse(
+        status="ok",
+        message="ok",
+        file_path=_VALID_PATH,
+        rules=["Tax is withheld at 15%."],
     )
+    with patch(
+        "app.api.v1.router.extract_business_logic",
+        new=AsyncMock(return_value=mock_response),
+    ):
+        response = await test_client.post(
+            "/api/v1/business-logic",
+            json={"file_path": _VALID_PATH},
+        )
     assert response.status_code == 200
     data = response.json()
-    assert data["status"] == "stub"
-    assert data["file_path"] == "samples/loans.cob"
-    assert data["rules"] == []
+    assert data["status"] == "ok"
+    assert len(data["rules"]) == 1
 
 
 @pytest.mark.asyncio
@@ -203,20 +250,30 @@ async def test_business_logic_stub_missing_file_rejected(
 
 
 @pytest.mark.asyncio
-async def test_impact_stub_valid_input(test_client: AsyncClient) -> None:
-    """Impact endpoint returns stub with paragraph_name echoed."""
-    response = await test_client.post(
-        "/api/v1/impact",
-        json={
-            "file_path": "samples/payroll.cob",
-            "paragraph_name": "CALC-OVERTIME",
-        },
+async def test_impact_endpoint_valid_input(test_client: AsyncClient) -> None:
+    """Impact endpoint calls analyze_impact and returns its response."""
+    mock_response = ImpactResponse(
+        status="ok",
+        message="ok",
+        paragraph_name="CALC-OVERTIME",
+        affected_paragraphs=["MAIN-PROCEDURE"],
     )
+    with patch(
+        "app.api.v1.router.analyze_impact",
+        new=AsyncMock(return_value=mock_response),
+    ):
+        response = await test_client.post(
+            "/api/v1/impact",
+            json={
+                "file_path": _VALID_PATH,
+                "paragraph_name": "CALC-OVERTIME",
+            },
+        )
     assert response.status_code == 200
     data = response.json()
-    assert data["status"] == "stub"
+    assert data["status"] == "ok"
     assert data["paragraph_name"] == "CALC-OVERTIME"
-    assert data["affected_paragraphs"] == []
+    assert "MAIN-PROCEDURE" in data["affected_paragraphs"]
 
 
 @pytest.mark.asyncio

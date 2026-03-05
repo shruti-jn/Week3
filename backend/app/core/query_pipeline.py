@@ -150,7 +150,7 @@ def _make_tracer(
             public_key=settings.langfuse_public_key,
             host=settings.langfuse_base_url,
         )
-        trace = lf.trace(
+        trace = lf.trace(  # type: ignore[attr-defined]  # Langfuse SDK; no stubs
             name="legacylens-query",
             input={"query": query, "top_k": top_k},
         )
@@ -194,6 +194,7 @@ def _ranked_to_snippet(r: RankedResult) -> CodeSnippet | None:
             content=str(meta["content"]),
             score=round(r.combined_score, 4),
             chunk_type=chunk_type,
+            paragraph_name=paragraph_name,
         )
     except (ValueError, TypeError) as e:
         logger.warning(

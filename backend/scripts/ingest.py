@@ -70,7 +70,7 @@ def _ensure_index_exists(pinecone_client: Pinecone, index_name: str) -> None:
     """
     Create the Pinecone index if it doesn't already exist.
 
-    voyage-code-2 produces EMBEDDING_DIMENSIONS-dimensional vectors (1024).
+    voyage-code-2 produces EMBEDDING_DIMENSIONS-dimensional vectors (1536).
     We use cosine similarity (standard for semantic search).
     Serverless on AWS us-east-1 is the Pinecone free-tier region.
 
@@ -141,7 +141,7 @@ async def ingest_all(cobol_root: Path) -> None:
     pinecone_client = Pinecone(api_key=settings.pinecone_api_key)
 
     # ── Create Pinecone index if it doesn't exist yet ─────────────────────
-    # voyage-code-2 produces 1024-dimensional vectors.
+    # voyage-code-2 produces 1536-dimensional vectors.
     # Serverless on AWS us-east-1 is the free-tier / lowest-cost option.
     _ensure_index_exists(pinecone_client, settings.pinecone_index_name)
 

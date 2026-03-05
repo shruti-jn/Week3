@@ -21,6 +21,13 @@ from pinecone import Pinecone
 
 from app.api.v1.dependencies import get_current_user
 from app.config import get_settings
+from app.core.features.cobol_features import (
+    _fetch_file_content,
+    analyze_impact,
+    explain_paragraph,
+    extract_business_logic,
+    map_dependencies,
+)
 from app.core.query_pipeline import stream_query_sse
 from app.dependencies import get_openai_client, get_pinecone_client, get_voyage_client
 from app.models.requests import (
@@ -34,6 +41,7 @@ from app.models.responses import (
     BusinessLogicResponse,
     DependenciesResponse,
     ExplainResponse,
+    FileResponse,
     ImpactResponse,
 )
 
@@ -45,7 +53,7 @@ api_router = APIRouter()
 async def query_endpoint(
     request: QueryRequest,
     current_user: dict[str, Any] = Depends(get_current_user),  # noqa: B008
-    voyage_client: voyageai.Client = Depends(get_voyage_client),  # noqa: B008  # type: ignore[name-defined]  # no stubs
+    voyage_client: voyageai.Client = Depends(get_voyage_client),  # type: ignore[name-defined]  # noqa: B008  # no stubs
     openai_client: AsyncOpenAI = Depends(get_openai_client),  # noqa: B008
     pinecone_client: Pinecone = Depends(get_pinecone_client),  # noqa: B008
 ) -> StreamingResponse:
@@ -97,65 +105,131 @@ async def query_endpoint(
     )
 
 
-# ── Placeholder: Explain endpoint ─────────────────────────────────────────────
+# ── Feature 1: Code Explanation ───────────────────────────────────────────────
 @api_router.post("/explain", response_model=ExplainResponse, tags=["features"])
-async def explain_stub(
+async def explain_endpoint(
     request: ExplainRequest,
     current_user: dict[str, Any] = Depends(get_current_user),  # noqa: B008
+    openai_client: AsyncOpenAI = Depends(get_openai_client),  # noqa: B008
 ) -> ExplainResponse:
-    """Stub: Code Explanation (Feature 1). Replaced in feature/api-code-features."""
+    """
+    Explain what a COBOL paragraph does in plain English.
+
+    Fetches the source file from GitHub, sends it to GPT-4o-mini with
+    the paragraph name, and returns a 2-4 sentence plain-English explanation.
+
+    Args:
+        request: file_path (stored Pinecone path) + paragraph_name.
+
+    Returns:
+        ExplainResponse with explanation field populated.
+    """
     _ = current_user
-    return ExplainResponse(
-        status="stub",
-        message="Not yet implemented",
-        paragraph_name=request.paragraph_name,
+    return await explain_paragraph(
+        request.file_path, request.paragraph_name, openai_client
     )
 
 
-# ── Placeholder: Dependencies endpoint ────────────────────────────────────────
+# ── Feature 2: Dependency Mapping ─────────────────────────────────────────────
 @api_router.post(
     "/dependencies", response_model=DependenciesResponse, tags=["features"]
 )
-async def dependencies_stub(
+async def dependencies_endpoint(
     request: DependenciesRequest,
     current_user: dict[str, Any] = Depends(get_current_user),  # noqa: B008
+    openai_client: AsyncOpenAI = Depends(get_openai_client),  # noqa: B008
 ) -> DependenciesResponse:
-    """Stub: Dependency Mapping (Feature 2). Replaced in feature/api-code-features."""
+    """
+    Map the PERFORM call graph for a COBOL paragraph.
+
+    Returns which paragraphs this one calls (calls) and which call it (called_by).
+
+    Args:
+        request: file_path + paragraph_name.
+
+    Returns:
+        DependenciesResponse with calls and called_by lists.
+    """
     _ = current_user
-    return DependenciesResponse(
-        status="stub",
-        message="Not yet implemented",
-        paragraph_name=request.paragraph_name,
+    return await map_dependencies(
+        request.file_path, request.paragraph_name, openai_client
     )
 
 
-# ── Placeholder: Business Logic endpoint ──────────────────────────────────────
+# ── Feature 3: Business Logic Extraction ──────────────────────────────────────
 @api_router.post(
     "/business-logic", response_model=BusinessLogicResponse, tags=["features"]
 )
-async def business_logic_stub(
+async def business_logic_endpoint(
     request: BusinessLogicRequest,
     current_user: dict[str, Any] = Depends(get_current_user),  # noqa: B008
+    openai_client: AsyncOpenAI = Depends(get_openai_client),  # noqa: B008
 ) -> BusinessLogicResponse:
-    """Stub: Business Logic (Feature 3). Replaced in feature/api-code-features."""
+    """
+    Extract plain-English business rules from an entire COBOL file.
+
+    Reads the full file and returns a list of human-readable business rules
+    encoded in the COBOL source (e.g. "Overtime applies after 40 hours").
+
+    Args:
+        request: file_path only (covers the whole file).
+
+    Returns:
+        BusinessLogicResponse with a list of business rule strings.
+    """
     _ = current_user
-    return BusinessLogicResponse(
-        status="stub",
-        message="Not yet implemented",
-        file_path=request.file_path,
+    return await extract_business_logic(request.file_path, openai_client)
+
+
+# ── Feature 4: Impact Analysis ────────────────────────────────────────────────
+@api_router.post("/impact", response_model=ImpactResponse, tags=["features"])
+async def impact_endpoint(
+    request: ImpactRequest,
+    current_user: dict[str, Any] = Depends(get_current_user),  # noqa: B008
+    openai_client: AsyncOpenAI = Depends(get_openai_client),  # noqa: B008
+) -> ImpactResponse:
+    """
+    Identify which COBOL paragraphs would break if a given paragraph changed.
+
+    Returns a list of paragraph names that directly or indirectly PERFORM
+    the target paragraph — i.e., the blast radius of a change.
+
+    Args:
+        request: file_path + paragraph_name.
+
+    Returns:
+        ImpactResponse with affected_paragraphs list.
+    """
+    _ = current_user
+    return await analyze_impact(
+        request.file_path, request.paragraph_name, openai_client
     )
 
 
-# ── Placeholder: Impact Analysis endpoint ─────────────────────────────────────
-@api_router.post("/impact", response_model=ImpactResponse, tags=["features"])
-async def impact_stub(
-    request: ImpactRequest,
+# ── Full File Context: read raw source via GitHub ─────────────────────────────
+@api_router.get("/file", response_model=FileResponse, tags=["features"])
+async def file_endpoint(
+    path: str,
     current_user: dict[str, Any] = Depends(get_current_user),  # noqa: B008
-) -> ImpactResponse:
-    """Stub: Impact Analysis (Feature 4). Replaced in feature/api-code-features."""
+) -> FileResponse:
+    """
+    Return the full raw COBOL source for a file (fetched from GitHub).
+
+    Used by the frontend "View Full File" modal to display the complete source
+    with the matched paragraph highlighted. Content is cached in memory so
+    repeated requests for the same file are fast.
+
+    Args:
+        path: The file_path as stored in Pinecone metadata (absolute local path).
+              Must contain 'gnucobol-contrib/' to be valid.
+
+    Returns:
+        FileResponse with content (raw source text) and line_count.
+    """
     _ = current_user
-    return ImpactResponse(
-        status="stub",
-        message="Not yet implemented",
-        paragraph_name=request.paragraph_name,
+    content = await _fetch_file_content(path)
+    return FileResponse(
+        file_path=path,
+        content=content,
+        line_count=content.count("\n") + 1,
     )

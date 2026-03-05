@@ -13,14 +13,16 @@ Pydantic-settings automatically reads from .env files during development
 and from real environment variables in production (Railway, Vercel).
 """
 
+import logging
 from functools import lru_cache
 
-from pydantic import Field
+from pydantic import Field, ValidationError
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 # Sentinel used to detect when Langfuse keys are not configured.
 # We use a module-level constant so the Settings class can reference it.
 _LANGFUSE_NOT_SET = ""
+logger = logging.getLogger(__name__)
 
 
 class Settings(BaseSettings):
@@ -147,4 +149,25 @@ def get_settings() -> Settings:
         settings = get_settings()
         api_key = settings.openai_api_key
     """
-    return Settings()
+    try:
+        return Settings()  # type: ignore[call-arg]  # pydantic-settings reads from env vars, not constructor args
+    except ValidationError as exc:
+        missing_fields = [
+            err["loc"][0]
+            for err in exc.errors()
+            if err.get("type") == "missing" and err.get("loc")
+        ]
+        missing_env_vars = sorted(
+            {str(field_name).upper() for field_name in missing_fields}
+        )
+
+        if missing_env_vars:
+            missing_list = ", ".join(missing_env_vars)
+            message = (
+                "Missing required environment variables: "
+                f"{missing_list}. "
+                "Set these in your deployment environment or backend/.env."
+            )
+            logger.error(message)
+            raise RuntimeError(message) from exc
+        raise

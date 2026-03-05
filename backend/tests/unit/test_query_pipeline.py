@@ -537,3 +537,179 @@ async def test_query_top_k_out_of_range_still_rejected_422(
     )
     assert r_low.status_code == 422
     assert r_high.status_code == 422
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Unit tests for query_pipeline internal helpers
+# These directly test _Span, _Tracer, _make_tracer, and _ranked_to_snippet
+# to cover the Langfuse-related paths and metadata edge cases.
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+def test_span_end_with_output_calls_span_end() -> None:
+    """_Span.end(output=...) forwards output to the underlying span object."""
+    from app.core.query_pipeline import _Span
+
+    mock_span = MagicMock()
+    span = _Span(mock_span)
+    span.end(output={"embed_ms": 42})
+    mock_span.end.assert_called_once_with(output={"embed_ms": 42})
+
+
+def test_span_end_without_output_calls_span_end_no_args() -> None:
+    """_Span.end() with no output calls span.end() with no keyword args."""
+    from app.core.query_pipeline import _Span
+
+    mock_span = MagicMock()
+    span = _Span(mock_span)
+    span.end()
+    mock_span.end.assert_called_once_with()
+
+
+def test_span_end_is_silent_when_span_is_none() -> None:
+    """_Span.end() does nothing (no error) when the span is None."""
+    from app.core.query_pipeline import _Span
+
+    span = _Span(None)
+    span.end(output={"key": "val"})  # must not raise
+
+
+def test_span_error_calls_span_end_with_error_level() -> None:
+    """_Span.error(message) marks the span as ERROR via span.end(level=...)."""
+    from app.core.query_pipeline import _Span
+
+    mock_span = MagicMock()
+    span = _Span(mock_span)
+    span.error("something broke")
+    mock_span.end.assert_called_once_with(level="ERROR", status_message="something broke")
+
+
+def test_span_error_is_silent_when_span_is_none() -> None:
+    """_Span.error() does nothing when the span is None."""
+    from app.core.query_pipeline import _Span
+
+    span = _Span(None)
+    span.error("oops")  # must not raise
+
+
+def test_tracer_span_returns_span_wrapping_trace_result() -> None:
+    """_Tracer.span() creates a child span and wraps it in _Span."""
+    from app.core.query_pipeline import _Span, _Tracer
+
+    mock_trace = MagicMock()
+    mock_child_span = MagicMock()
+    mock_trace.span.return_value = mock_child_span
+
+    tracer = _Tracer(mock_trace)
+    result = tracer.span("embed", {"query": "test"})
+
+    assert isinstance(result, _Span)
+    mock_trace.span.assert_called_once()
+
+
+def test_tracer_span_is_noop_when_trace_is_none() -> None:
+    """_Tracer.span() returns a no-op _Span(None) when the trace is None."""
+    from app.core.query_pipeline import _Span, _Tracer
+
+    tracer = _Tracer(None)
+    result = tracer.span("embed")
+    assert isinstance(result, _Span)
+    assert result._span is None
+
+
+def test_tracer_finish_calls_trace_update_with_output() -> None:
+    """_Tracer.finish(output=...) forwards output to the underlying trace."""
+    from app.core.query_pipeline import _Tracer
+
+    mock_trace = MagicMock()
+    tracer = _Tracer(mock_trace)
+    tracer.finish(output={"result": "done"})
+    mock_trace.update.assert_called_once_with(output={"result": "done"})
+
+
+def test_tracer_finish_is_noop_when_trace_is_none() -> None:
+    """_Tracer.finish() does nothing when the trace is None."""
+    from app.core.query_pipeline import _Tracer
+
+    tracer = _Tracer(None)
+    tracer.finish(output={"x": 1})  # must not raise
+
+
+def test_tracer_error_calls_trace_update_with_error() -> None:
+    """_Tracer.error() marks the trace as ERROR via trace.update(...)."""
+    from app.core.query_pipeline import _Tracer
+
+    mock_trace = MagicMock()
+    tracer = _Tracer(mock_trace)
+    tracer.error("pipeline failed")
+    mock_trace.update.assert_called_once_with(level="ERROR", status_message="pipeline failed")
+
+
+def test_tracer_error_is_noop_when_trace_is_none() -> None:
+    """_Tracer.error() does nothing when the trace is None."""
+    from app.core.query_pipeline import _Tracer
+
+    tracer = _Tracer(None)
+    tracer.error("boom")  # must not raise
+
+
+def test_make_tracer_returns_noop_tracer_when_langfuse_disabled() -> None:
+    """_make_tracer returns _Tracer(None) when langfuse_enabled is False."""
+    from app.core.query_pipeline import _Tracer, _make_tracer
+
+    settings = MagicMock()
+    settings.langfuse_enabled = False
+
+    tracer = _make_tracer("test query", 5, settings)
+
+    assert isinstance(tracer, _Tracer)
+    assert tracer._trace is None
+
+
+def test_ranked_to_snippet_returns_none_when_required_metadata_key_missing() -> None:
+    """
+    _ranked_to_snippet returns None (with a warning log) when a required
+    metadata key is absent — prevents sending invalid snippets to the client.
+    """
+    from app.core.query_pipeline import _ranked_to_snippet
+    from app.core.retrieval.reranker import RankedResult
+
+    # Metadata is empty — every required key is missing
+    result = RankedResult(
+        chunk_id="test::chunk",
+        cosine_score=0.9,
+        keyword_score=0.0,
+        combined_score=0.9,
+        metadata={},  # missing file_path, start_line, end_line, content
+    )
+
+    snippet = _ranked_to_snippet(result)
+
+    assert snippet is None
+
+
+def test_ranked_to_snippet_returns_none_when_metadata_values_are_invalid() -> None:
+    """
+    _ranked_to_snippet returns None when metadata values cannot be cast to
+    their expected types — e.g. start_line is a non-numeric string.
+    """
+    from app.core.query_pipeline import _ranked_to_snippet
+    from app.core.retrieval.reranker import RankedResult
+
+    # All required keys present, but start_line is not a valid integer
+    result = RankedResult(
+        chunk_id="test::chunk",
+        cosine_score=0.9,
+        keyword_score=0.0,
+        combined_score=0.9,
+        metadata={
+            "file_path": "programs/test.cob",
+            "start_line": "not-a-number",  # int("not-a-number") raises ValueError
+            "end_line": 20,
+            "content": "COMPUTE X = 1.",
+        },
+    )
+
+    snippet = _ranked_to_snippet(result)
+
+    assert snippet is None
