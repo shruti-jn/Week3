@@ -67,3 +67,6 @@ logs/
 # ── Docker ────────────────────────────────────────────────────────────────────
 .docker/
 .vercel
+
+# ── Local-only docs (not for repo) ───────────────────────────────────────────
+docs/latency-optimization-star.md
