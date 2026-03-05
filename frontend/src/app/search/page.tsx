@@ -811,6 +811,10 @@ export default function SearchPage(): React.JSX.Element {
   const [metrics, setMetrics] = useState<QueryMetrics | null>(null)
   const [submittedQuery, setSubmittedQuery] = useState('')
   const [queryLog, setQueryLog] = useState<QueryLogEntry[]>([])
+  // Raw NextAuth JWT (signed with NEXTAUTH_SECRET) — required by FastAPI's HS256 validator.
+  // session.accessToken is the GitHub OAuth token (opaque), not a JWT; this fetches
+  // the actual signed session cookie JWT via the /api/auth/token route.
+  const [backendToken, setBackendToken] = useState('')
 
   /**
    * openFile — state for the FileModal overlay.
@@ -835,6 +839,21 @@ export default function SearchPage(): React.JSX.Element {
     setQueryLog(loadQueryLog())
   }, [])
 
+  // Fetch the raw NextAuth JWT once the session is established.
+  // FastAPI verifies HS256 tokens signed with NEXTAUTH_SECRET — this is the
+  // session cookie JWT, not the GitHub OAuth access token in session.accessToken.
+  useEffect(() => {
+    if (!session) return
+    fetch('/api/auth/token')
+      .then((r) => r.json())
+      .then(({ token }: { token?: string }) => {
+        if (token) setBackendToken(token)
+      })
+      .catch(() => {
+        // Silently ignore — the query will surface a 401 if auth fails
+      })
+  }, [session])
+
   // Wake the Railway dyno early — free-tier dynos sleep after inactivity.
   // Firing on page load gives the backend ~2 seconds to warm up before the
   // user submits their first query.
@@ -848,7 +867,7 @@ export default function SearchPage(): React.JSX.Element {
     const finalQuery = (q ?? query).trim()
     if (!finalQuery || loading) return
 
-    const token = session?.accessToken ?? ''
+    const token = backendToken
 
     setLoading(true)
     setSnippets([])
@@ -919,7 +938,7 @@ export default function SearchPage(): React.JSX.Element {
    */
   const handleViewFile = useCallback(
     async (snippet: CodeSnippet): Promise<void> => {
-      const token = session?.accessToken ?? ''
+      const token = backendToken
       // Show the modal right away with a loading indicator
       setOpenFile({ snippet, content: null, loading: true })
       try {
@@ -933,7 +952,7 @@ export default function SearchPage(): React.JSX.Element {
         )
       }
     },
-    [session]
+    [backendToken]
   )
 
   const hasResults = snippets.length > 0 || answer || loading
@@ -1071,7 +1090,7 @@ export default function SearchPage(): React.JSX.Element {
                       key={`${s.file_path}-${s.start_line}`}
                       snippet={s}
                       index={i}
-                      accessToken={session?.accessToken ?? ''}
+                      accessToken={backendToken}
                       onViewFile={(snippet) => void handleViewFile(snippet)}
                     />
                   ))}
