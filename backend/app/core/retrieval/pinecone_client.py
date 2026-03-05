@@ -21,7 +21,6 @@ Pipeline position:
 import asyncio
 import functools
 import logging
-import time
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -29,8 +28,7 @@ logger = logging.getLogger(__name__)
 
 # Retry configuration for transient Pinecone failures (rate limits, 503s).
 # We try up to 3 times with exponential backoff: 1s, 2s, 4s.
-# time.sleep() is used (not asyncio.sleep) because we're inside an executor
-# thread — the event loop is not accessible from there.
+# asyncio.sleep() is used so the event loop stays responsive while waiting.
 _MAX_RETRIES = 3
 _RETRY_BASE_DELAY_S = 1.0
 
@@ -189,8 +187,8 @@ class PineconeWrapper:
         Call Pinecone upsert with exponential backoff retry on transient errors.
 
         Runs the synchronous Pinecone SDK call in a thread-pool executor
-        so it doesn't block the async event loop. Uses time.sleep() (not
-        asyncio.sleep) because we're inside the executor thread context.
+        so it doesn't block the async event loop. Uses asyncio.sleep() between
+        retry attempts to yield control back to the event loop while waiting.
 
         Args:
             pinecone_records: List of Pinecone-formatted dicts to upsert.
@@ -221,8 +219,7 @@ class PineconeWrapper:
                     exc,
                     delay,
                 )
-                # time.sleep (not asyncio.sleep) — we're inside a thread executor
-                time.sleep(delay)
+                await asyncio.sleep(delay)
 
         msg = (
             f"Pinecone upsert failed after {_MAX_RETRIES} attempts "
@@ -322,8 +319,8 @@ class PineconeWrapper:
         Call Pinecone query with exponential backoff retry on transient errors.
 
         Runs the synchronous Pinecone SDK call in a thread-pool executor
-        so it doesn't block the async event loop. Uses time.sleep() (not
-        asyncio.sleep) because we're inside the executor thread context.
+        so it doesn't block the async event loop. Uses asyncio.sleep() between
+        retry attempts to yield control back to the event loop while waiting.
 
         Args:
             embedding: The query vector (1536 floats).
@@ -360,7 +357,7 @@ class PineconeWrapper:
                     exc,
                     delay,
                 )
-                time.sleep(delay)
+                await asyncio.sleep(delay)
 
         msg = f"Pinecone query failed after {_MAX_RETRIES} attempts: {last_exc}"
         raise RuntimeError(msg)

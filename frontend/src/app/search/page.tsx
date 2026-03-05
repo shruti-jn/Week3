@@ -835,9 +835,13 @@ export default function SearchPage(): React.JSX.Element {
     setQueryLog(loadQueryLog())
   }, [])
 
-  // Keepalive ping — wakes Railway backend on page load to eliminate cold-start delay
+  // Wake the Railway dyno early — free-tier dynos sleep after inactivity.
+  // Firing on page load gives the backend ~2 seconds to warm up before the
+  // user submits their first query.
   useEffect(() => {
-    fetch(`${process.env.NEXT_PUBLIC_API_URL}/health`).catch(() => {})
+    fetch(`${process.env.NEXT_PUBLIC_API_URL}/health`).catch(() => {
+      // Best-effort warmup — ignore failures silently, don't block the UI
+    })
   }, [])
 
   const handleSubmit = async (q?: string): Promise<void> => {
