@@ -835,6 +835,11 @@ export default function SearchPage(): React.JSX.Element {
     setQueryLog(loadQueryLog())
   }, [])
 
+  // Keepalive ping — wakes Railway backend on page load to eliminate cold-start delay
+  useEffect(() => {
+    fetch(`${process.env.NEXT_PUBLIC_API_URL}/health`).catch(() => {})
+  }, [])
+
   const handleSubmit = async (q?: string): Promise<void> => {
     const finalQuery = (q ?? query).trim()
     if (!finalQuery || loading) return
