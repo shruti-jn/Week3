@@ -170,3 +170,4 @@ Planned next:
 - If reviewers request strict accounting, append dashboard-exported usage CSVs to
   this document. Current Section 3.1 values are evidence-based reconstructed estimates.
 - The project prompt does not enforce a specific filename, so `docs/COST_LOG.md` can be submitted as the AI Cost Analysis deliverable.
+
