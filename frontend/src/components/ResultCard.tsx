@@ -4,7 +4,7 @@
  * ResultCard — Displays one COBOL code snippet from the search results.
  *
  * Like a single Google result card, but for COBOL code. Shows the file name,
- * the line range where the code lives, a similarity score, and the actual
+ * the line range where the code lives, both relevance scores, and the actual
  * COBOL source with syntax highlighting.
  *
  * @param snippet - The COBOL code chunk returned by the vector database.
@@ -22,12 +22,13 @@ interface ResultCardProps {
 }
 
 export function ResultCard({ snippet, rank }: ResultCardProps): React.JSX.Element {
-  // Convert 0.0–1.0 cosine score to a whole-number percentage (e.g. 0.91 → 91)
-  const scorePercent = Math.round(snippet.score * 100)
+  // Combined score is the primary ranking signal shown in the UI.
+  const combinedPercent = Math.round(snippet.combined_score * 100)
+  const cosinePercent = Math.round(snippet.cosine_score * 100)
 
   return (
     <div className="rounded border border-gray-200 bg-white p-4 shadow-sm">
-      {/* Header row: rank badge, file path, line range, score */}
+      {/* Header row: rank badge, file path, line range, scores */}
       <div className="mb-2 flex flex-wrap items-center gap-2 text-sm">
         <span className="rounded bg-blue-100 px-2 py-0.5 font-mono font-semibold text-blue-800">
           #{rank}
@@ -36,7 +37,12 @@ export function ResultCard({ snippet, rank }: ResultCardProps): React.JSX.Elemen
         <span className="text-gray-500">
           Lines {snippet.start_line}–{snippet.end_line}
         </span>
-        <span className="rounded bg-green-100 px-2 py-0.5 text-green-800">{scorePercent}%</span>
+        <span className="rounded bg-green-100 px-2 py-0.5 text-green-800">
+          combined {combinedPercent}%
+        </span>
+        <span className="rounded bg-gray-100 px-2 py-0.5 text-gray-700">
+          cosine {cosinePercent}%
+        </span>
       </div>
 
       {/* COBOL source code with syntax highlighting */}

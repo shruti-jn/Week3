@@ -24,8 +24,12 @@ export interface CodeSnippet {
   end_line: number
   /** The raw COBOL source code for this snippet */
   content: string
-  /** Combined relevance score (0.0–1.0, higher = more relevant) */
+  /** Backward-compatible alias of combined_score (0.0–1.0). */
   score: number
+  /** Raw Pinecone cosine score before reranking blend (0.0–1.0). */
+  cosine_score: number
+  /** Final blended reranker score shown as primary relevance (0.0–1.0). */
+  combined_score: number
   /**
    * How this chunk was split: "paragraph" means it was cut at a natural COBOL
    * paragraph boundary; "fixed" means it was cut at a fixed line count.

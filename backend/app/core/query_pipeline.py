@@ -197,6 +197,8 @@ def _ranked_to_snippet(r: RankedResult) -> CodeSnippet | None:
             end_line=int(meta["end_line"]),
             content=str(meta["content"]),
             score=round(r.combined_score, 4),
+            cosine_score=round(r.cosine_score, 4),
+            combined_score=round(r.combined_score, 4),
             chunk_type=chunk_type,
             paragraph_name=paragraph_name,
         )

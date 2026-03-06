@@ -28,6 +28,8 @@ const MOCK_SNIPPET: CodeSnippet = {
   end_line: 58,
   content: '       CALC-INTEREST.\n           COMPUTE INTEREST = PRINCIPAL * RATE.',
   score: 0.91,
+  cosine_score: 0.94,
+  combined_score: 0.91,
   chunk_type: 'paragraph',
   paragraph_name: 'CALC-INTEREST',
 }

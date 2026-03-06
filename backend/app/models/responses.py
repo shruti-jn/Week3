@@ -15,7 +15,7 @@ from __future__ import annotations
 
 from typing import Optional
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Shared sub-models
@@ -29,8 +29,9 @@ class CodeSnippet(BaseModel):
     Think of this like a search result card in Google — it shows you where
     to find the relevant code (file + line numbers) and what the code says.
 
-    Each snippet has a similarity score: 1.0 means a perfect match,
-    0.65 is our minimum threshold (anything lower is ignored).
+    Scores:
+    - score / combined_score: final reranked score shown in UI
+    - cosine_score: raw Pinecone cosine similarity before keyword blending
 
     chunk_type tells you whether this snippet was split at a natural COBOL
     paragraph boundary ("paragraph") or cut at a fixed line count ("fixed").
@@ -61,7 +62,28 @@ class CodeSnippet(BaseModel):
         ...,
         ge=0.0,
         le=1.0,
-        description="Cosine similarity score from Pinecone (0.0-1.0).",
+        description=(
+            "Final reranked score (0.0-1.0). This is the same value as "
+            "combined_score and is kept for backward compatibility."
+        ),
+    )
+    cosine_score: float | None = Field(
+        default=None,
+        ge=0.0,
+        le=1.0,
+        description=(
+            "Raw cosine similarity score from Pinecone (0.0-1.0), before "
+            "keyword-overlap blending."
+        ),
+    )
+    combined_score: float | None = Field(
+        default=None,
+        ge=0.0,
+        le=1.0,
+        description=(
+            "Final blended relevance score (0.0-1.0): "
+            "0.7 * cosine_score + 0.3 * keyword_score."
+        ),
     )
     chunk_type: str = Field(
         default="paragraph",
@@ -90,6 +112,21 @@ class CodeSnippet(BaseModel):
                 f"end_line ({self.end_line}) must be >= start_line ({self.start_line})."
             )
             raise ValueError(msg)
+
+    @model_validator(mode="after")
+    def _normalize_score_fields(self) -> CodeSnippet:
+        """
+        Keep score fields consistent for old and new clients.
+
+        - score is the canonical backward-compatible field.
+        - combined_score defaults to score if omitted.
+        - cosine_score defaults to score if omitted (legacy payloads had only score).
+        """
+        if self.combined_score is None:
+            self.combined_score = self.score
+        if self.cosine_score is None:
+            self.cosine_score = self.score
+        return self
 
 
 # ─────────────────────────────────────────────────────────────────────────────

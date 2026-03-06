@@ -14,7 +14,7 @@
  *   ⏱ 1.23s  ↑ 0.921  ~ 0.847  📄 2 files  # 3 chunks
  *   embed 42ms · retrieve 180ms · rerank 3ms · llm 1005ms
  *
- *   ● PAYMNT-CALC  [PARA]  score: 0.91  payroll/PAYROLL.cob · lines 142–178
+ *   ● PAYMNT-CALC  [PARA]  combined: 0.91 · cosine: 0.94  payroll/PAYROLL.cob · lines 142–178
  *   ────────────────────────────────────────────────
  *     142 │ PAYMNT-CALC.
  *     143 │     COMPUTE WS-GROSS-PAY = ...
@@ -31,6 +31,7 @@
 import { useState, useRef, useEffect, useCallback, type FormEvent } from 'react'
 import { useSession } from 'next-auth/react'
 import type { Session } from 'next-auth'
+import Link from 'next/link'
 import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter'
 import { vscDarkPlus } from 'react-syntax-highlighter/dist/cjs/styles/prism'
 import AuthButton from '@/components/AuthButton'
@@ -244,11 +245,15 @@ function SnippetCard({
           </span>
         </button>
 
-        {/* Right: score + view file + expand */}
+        {/* Right: scores + view file + expand */}
         <div className="ml-3 flex flex-shrink-0 items-center gap-3">
-          <span className="font-mono text-xs">
-            <span className="text-terminal-muted">score: </span>
-            <span className="text-terminal-accent">{snippet.score.toFixed(3)}</span>
+          <span className="font-mono text-xs" title="Final blended relevance score">
+            <span className="text-terminal-muted">combined: </span>
+            <span className="text-terminal-accent">{snippet.combined_score.toFixed(3)}</span>
+          </span>
+          <span className="font-mono text-xs" title="Raw Pinecone cosine similarity">
+            <span className="text-terminal-dim">cosine: </span>
+            <span className="text-terminal-muted">{snippet.cosine_score.toFixed(3)}</span>
           </span>
           {/* View Full File button */}
           <button
@@ -992,6 +997,14 @@ export default function SearchPage(): React.JSX.Element {
             · COBOL code intelligence
           </span>
         </div>
+        <nav className="hidden items-center gap-6 sm:flex">
+          <Link
+            href="/architecture"
+            className="text-xs text-terminal-muted transition-colors hover:text-terminal-accent"
+          >
+            architecture
+          </Link>
+        </nav>
         <AuthButton />
       </header>
 

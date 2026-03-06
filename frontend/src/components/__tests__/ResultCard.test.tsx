@@ -31,6 +31,8 @@ const SAMPLE_SNIPPET: CodeSnippet = {
   end_line: 58,
   content: '       CALC-INTEREST.\n           COMPUTE INTEREST = PRINCIPAL * RATE.',
   score: 0.91,
+  cosine_score: 0.94,
+  combined_score: 0.91,
 }
 
 describe('ResultCard', () => {
@@ -46,10 +48,10 @@ describe('ResultCard', () => {
     expect(screen.getByText(/42.*58|Lines 42.*58/)).toBeInTheDocument()
   })
 
-  it('renders the similarity score as a percentage', () => {
+  it('renders combined and cosine scores as percentages', () => {
     render(<ResultCard snippet={SAMPLE_SNIPPET} rank={1} />)
-    // 0.91 → "91%" (rounded to nearest integer)
-    expect(screen.getByText(/91%/)).toBeInTheDocument()
+    expect(screen.getByText(/combined 91%/i)).toBeInTheDocument()
+    expect(screen.getByText(/cosine 94%/i)).toBeInTheDocument()
   })
 
   it('renders the rank number', () => {
@@ -79,15 +81,27 @@ describe('ResultCard', () => {
   })
 
   it('handles a score of 1.0 (perfect match)', () => {
-    const perfect: CodeSnippet = { ...SAMPLE_SNIPPET, score: 1.0 }
+    const perfect: CodeSnippet = {
+      ...SAMPLE_SNIPPET,
+      score: 1.0,
+      combined_score: 1.0,
+      cosine_score: 1.0,
+    }
     render(<ResultCard snippet={perfect} rank={1} />)
-    expect(screen.getByText(/100%/)).toBeInTheDocument()
+    expect(screen.getByText(/combined 100%/i)).toBeInTheDocument()
+    expect(screen.getByText(/cosine 100%/i)).toBeInTheDocument()
   })
 
   it('handles a score at the minimum threshold (0.75)', () => {
-    const threshold: CodeSnippet = { ...SAMPLE_SNIPPET, score: 0.75 }
+    const threshold: CodeSnippet = {
+      ...SAMPLE_SNIPPET,
+      score: 0.75,
+      combined_score: 0.75,
+      cosine_score: 0.75,
+    }
     render(<ResultCard snippet={threshold} rank={1} />)
-    expect(screen.getByText(/75%/)).toBeInTheDocument()
+    expect(screen.getByText(/combined 75%/i)).toBeInTheDocument()
+    expect(screen.getByText(/cosine 75%/i)).toBeInTheDocument()
   })
 
   it('renders a long file path without crashing', () => {
