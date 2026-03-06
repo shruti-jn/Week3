@@ -806,6 +806,7 @@ const EXAMPLE_QUERIES = [
   'DES encryption algorithm implementation',
   'How do you insert a record into a database?',
   'Parse HTML form data in a CGI COBOL program',
+  'What does the CHECK-CONTENT-DISPOSITION paragraph do?',
 ]
 
 // ── Main page ─────────────────────────────────────────────────────────────────
