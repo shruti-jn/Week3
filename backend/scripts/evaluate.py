@@ -21,6 +21,7 @@ import argparse
 import asyncio
 import json
 import os
+import sys
 from dataclasses import asdict, dataclass
 from datetime import UTC, datetime
 from pathlib import Path
@@ -29,24 +30,24 @@ from typing import Any
 import voyageai
 from pinecone import Pinecone
 
+# Ensure `backend/` is on sys.path so `scripts.eval_shared` is importable whether
+# this file is run as `python scripts/evaluate.py` or `python -m scripts.evaluate`.
+_BACKEND_DIR = Path(__file__).resolve().parent.parent
+if str(_BACKEND_DIR) not in sys.path:
+    sys.path.insert(0, str(_BACKEND_DIR))
+
 from app.core.ingestion.embedder import embed_query
 from app.core.retrieval.pinecone_client import PineconeWrapper, SearchResult
+from scripts.eval_shared import (
+    FailureMode,
+    GoldenQuery,
+    classify_result,
+    load_golden_queries,
+)
 
 TOP_K = 5
 FIXTURE_PATH = Path("tests/fixtures/golden_queries.json")
 DEFAULT_RESULTS_DIR = Path("eval_results")
-
-
-@dataclass
-class GoldenQuery:
-    """One golden query entry loaded from tests/fixtures/golden_queries.json."""
-
-    id: str
-    query: str
-    expected_paragraph: str | None
-    expected_file_pattern: str
-    min_score: float
-    category: str
 
 
 @dataclass
@@ -62,79 +63,38 @@ class QueryEvalResult:
     top_score: float
     top_chunk_id: str | None
     top_file_path: str | None
+    failure_mode: str
     reason: str
 
 
-def _load_golden_queries(path: Path) -> list[GoldenQuery]:
-    """
-    Load and validate golden query entries from a JSON fixture file.
-
-    The fixture starts with a metadata comment object, so we only load entries
-    that include real query IDs.
-    """
-    raw = json.loads(path.read_text(encoding="utf-8"))
-    queries: list[GoldenQuery] = []
-    for item in raw:
-        if "id" not in item:
-            continue
-        queries.append(
-            GoldenQuery(
-                id=str(item["id"]),
-                query=str(item["query"]),
-                expected_paragraph=(
-                    str(item["expected_paragraph"])
-                    if item["expected_paragraph"] is not None
-                    else None
-                ),
-                expected_file_pattern=str(item["expected_file_pattern"]),
-                min_score=float(item["min_score"]),
-                category=str(item["category"]),
-            )
-        )
-    return queries
-
-
-def _matches_expected(result: SearchResult, golden: GoldenQuery) -> bool:
-    """Return True when one retrieval result satisfies the golden expectation."""
-    file_path = str(result.metadata.get("file_path", ""))
-    paragraph_name = str(result.metadata.get("paragraph_name", ""))
-
-    if golden.expected_file_pattern.lower() not in file_path.lower():
-        return False
-
-    if golden.expected_paragraph is None:
-        return True
-
-    return paragraph_name.upper() == golden.expected_paragraph.upper()
-
-
 def _evaluate_one(golden: GoldenQuery, results: list[SearchResult]) -> QueryEvalResult:
-    """Score one query by checking whether expected chunk is in the top-k results."""
+    """
+    Score one query by checking whether the expected chunk is in the top-k results.
+
+    Converts SearchResult objects into the (file_path, paragraph_name, score)
+    tuples that classify_result expects, then maps the FailureMode back to
+    human-readable reason strings for the report.
+    """
     top = results[0] if results else None
-    matched = next((r for r in results if _matches_expected(r, golden)), None)
+    top_score = float(top.score) if top else 0.0
 
-    if matched is None:
-        reason = "expected chunk not in top-5"
-        return QueryEvalResult(
-            id=golden.id,
-            query=golden.query,
-            category=golden.category,
-            passed=False,
-            threshold=golden.min_score,
-            matched_score=None,
-            top_score=float(top.score) if top else 0.0,
-            top_chunk_id=str(top.chunk_id) if top else None,
-            top_file_path=str(top.metadata.get("file_path", "")) if top else None,
-            reason=reason,
+    snippets = [
+        (
+            str(r.metadata.get("file_path", "")),
+            str(r.metadata.get("paragraph_name", "")),
+            float(r.score),
         )
+        for r in results
+    ]
 
-    matched_score = float(matched.score)
-    passed = matched_score >= golden.min_score
-    reason = (
-        "expected chunk found and passed threshold"
-        if passed
-        else "expected chunk found but below threshold"
-    )
+    passed, matched_score, failure_mode = classify_result(golden, snippets, top_score)
+
+    reason_map = {
+        FailureMode.NO_RESULTS: "no snippets returned — check SIMILARITY_THRESHOLD in Railway env",
+        FailureMode.NOT_RETRIEVED: "expected chunk not in top-5",
+        FailureMode.BELOW_THRESHOLD: "expected chunk found but below threshold",
+        FailureMode.PASSED: "expected chunk found and passed threshold",
+    }
 
     return QueryEvalResult(
         id=golden.id,
@@ -143,10 +103,11 @@ def _evaluate_one(golden: GoldenQuery, results: list[SearchResult]) -> QueryEval
         passed=passed,
         threshold=golden.min_score,
         matched_score=matched_score,
-        top_score=float(top.score) if top else 0.0,
+        top_score=top_score,
         top_chunk_id=str(top.chunk_id) if top else None,
         top_file_path=str(top.metadata.get("file_path", "")) if top else None,
-        reason=reason,
+        failure_mode=failure_mode.value,
+        reason=reason_map[failure_mode],
     )
 
 
@@ -167,7 +128,7 @@ async def _run_eval() -> dict[str, Any]:
     pinecone_client = Pinecone(api_key=pinecone_api_key)
     wrapper = PineconeWrapper(pinecone_client, pinecone_index_name)
 
-    golden_queries = _load_golden_queries(FIXTURE_PATH)
+    golden_queries = load_golden_queries(FIXTURE_PATH)
     query_results: list[QueryEvalResult] = []
 
     for golden in golden_queries:
@@ -211,8 +172,8 @@ def _build_markdown_report(report: dict[str, Any]) -> str:
     )
     lines.append(f"- Target: `{report['target_precision_at_5']:.2f}`")
     lines.append("")
-    lines.append("| ID | Pass | Matched Score | Threshold | Top Score | Reason |")
-    lines.append("|---|---|---:|---:|---:|---|")
+    lines.append("| ID | Pass | Matched | Threshold | Top | Failure Mode | Reason |")
+    lines.append("|---|---|---:|---:|---:|---|---|")
 
     for item in report["results"]:
         matched_score = (
@@ -221,7 +182,8 @@ def _build_markdown_report(report: dict[str, Any]) -> str:
         pass_mark = "PASS" if item["passed"] else "FAIL"
         lines.append(
             f"| {item['id']} | {pass_mark} | {matched_score} | "
-            f"{item['threshold']:.2f} | {item['top_score']:.4f} | {item['reason']} |"
+            f"{item['threshold']:.2f} | {item['top_score']:.4f} | "
+            f"{item['failure_mode']} | {item['reason']} |"
         )
 
     return "\n".join(lines) + "\n"

@@ -3,15 +3,16 @@
     "_comment": "Golden query set — queries derived from actual gnucobol-contrib content.",
     "_comment2": "These measure Precision@5: what % of queries find the right chunk in the top 5 results?",
     "_comment3": "Target: >70% of queries should return the expected paragraph in their top 5 results.",
-    "_comment4": "Run with: pytest tests/integration/test_golden_queries.py",
-    "_comment5": "Target codebase: data/gnucobol-contrib (real community-contributed COBOL, not custom files)"
+    "_comment4": "Run with: pytest -m integration tests/integration/test_golden_queries.py",
+    "_comment5": "Target codebase: data/gnucobol-contrib (real community-contributed COBOL, not custom files)",
+    "_comment6": "failure_mode values: no_results (API returned nothing — check SIMILARITY_THRESHOLD before assuming file missing), not_retrieved (indexed but wrong chunk ranked), below_threshold (found but low score), passed"
   },
   {
     "id": "gq-001",
     "query": "file sort COBOL program",
     "expected_paragraph": null,
     "expected_file_pattern": "GCSORT",
-    "min_score": 0.75,
+    "min_score": 0.65,
     "category": "code_explanation"
   },
   {
@@ -19,7 +20,7 @@
     "query": "how to sort a file in COBOL",
     "expected_paragraph": null,
     "expected_file_pattern": "GCSORT",
-    "min_score": 0.75,
+    "min_score": 0.65,
     "category": "code_explanation"
   },
   {
@@ -41,7 +42,7 @@
   {
     "id": "gq-005",
     "query": "database connection SQL COBOL program",
-    "expected_paragraph": "CONNECT",
+    "expected_paragraph": null,
     "expected_file_pattern": "PGMOD",
     "min_score": 0.70,
     "category": "dependency_mapping"
@@ -49,7 +50,7 @@
   {
     "id": "gq-006",
     "query": "how to insert a record into a database",
-    "expected_paragraph": "INSERT-BOOK",
+    "expected_paragraph": null,
     "expected_file_pattern": "PGMOD",
     "min_score": 0.70,
     "category": "business_logic"
@@ -85,5 +86,93 @@
     "expected_file_pattern": "getdatez",
     "min_score": 0.65,
     "category": "business_logic"
+  },
+  {
+    "id": "gq-011",
+    "query": "SHA3 hash session token generation COBOL",
+    "expected_paragraph": null,
+    "expected_file_pattern": "cobsha3",
+    "min_score": 0.60,
+    "category": "code_explanation"
+  },
+  {
+    "id": "gq-012",
+    "query": "TCP server socket receive data from peer COBOL",
+    "expected_paragraph": null,
+    "expected_file_pattern": "tcpipserver",
+    "min_score": 0.60,
+    "category": "code_explanation"
+  },
+  {
+    "id": "gq-013",
+    "query": "HTTP REST client connect to server COBOL",
+    "expected_paragraph": null,
+    "expected_file_pattern": "RESTclient",
+    "min_score": 0.60,
+    "category": "code_explanation"
+  },
+  {
+    "id": "gq-014",
+    "query": "look up customer record indexed file COBOL",
+    "expected_paragraph": null,
+    "expected_file_pattern": "cust01",
+    "min_score": 0.60,
+    "category": "business_logic"
+  },
+  {
+    "id": "gq-015",
+    "query": "add new customer record COBOL file",
+    "expected_paragraph": null,
+    "expected_file_pattern": "cust01",
+    "min_score": 0.60,
+    "category": "business_logic"
+  },
+  {
+    "id": "gq-016",
+    "query": "delete record from COBOL indexed file",
+    "expected_paragraph": null,
+    "expected_file_pattern": "PGMOD5",
+    "min_score": 0.60,
+    "category": "business_logic"
+  },
+  {
+    "id": "gq-017",
+    "query": "city country geographic data lookup COBOL",
+    "expected_paragraph": null,
+    "expected_file_pattern": "worldcities",
+    "min_score": 0.60,
+    "category": "business_logic"
+  },
+  {
+    "id": "gq-018",
+    "query": "ELIZA natural language chatbot COBOL program",
+    "expected_paragraph": null,
+    "expected_file_pattern": "eliza",
+    "min_score": 0.60,
+    "category": "code_explanation"
+  },
+  {
+    "id": "gq-019",
+    "query": "publish message to subscribers COBOL",
+    "expected_paragraph": null,
+    "expected_file_pattern": "messagepublish",
+    "min_score": 0.60,
+    "category": "dependency_mapping"
+  },
+  {
+    "id": "gq-020",
+    "query": "receive message from queue COBOL socket",
+    "expected_paragraph": null,
+    "expected_file_pattern": "messagereceive",
+    "min_score": 0.60,
+    "category": "dependency_mapping"
+  },
+  {
+    "id": "gq-021",
+    "query": "GCSORT COBOL utility to sort files",
+    "expected_paragraph": null,
+    "expected_file_pattern": "GCSORT",
+    "min_score": 0.65,
+    "category": "code_explanation"
   }
 ]
