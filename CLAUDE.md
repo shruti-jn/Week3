@@ -58,9 +58,12 @@ All Python code must pass before committing:
 - `mypy app/ --strict` (type checking — no guessing about data types)
 
 All TypeScript code must pass before committing:
-- `eslint src/ --max-warnings 0`
+- `eslint src/ --max-warnings 0` (zero ESLint errors or warnings permitted)
 - `prettier --check src/`
 - `tsc --noEmit`
+
+**All code must be ESLint compatible.** Never commit TypeScript/JavaScript with ESLint errors.
+Fix lint errors before committing — do not suppress them with `// eslint-disable` without a reason comment.
 
 **Never commit code with type errors.** If a type is genuinely unknown, add a
 `# type: ignore` comment with a reason. Never use bare `any` in TypeScript without a comment.

@@ -34,7 +34,14 @@ export const metadata: Metadata = {
  * Returns the raw inner content of each block (without the fence lines).
  */
 function extractMermaidBlocks(markdown: string): string[] {
-  return [...markdown.matchAll(/```mermaid\n([\s\S]*?)```/g)].map((m) => m[1].trim())
+  // Use exec() loop instead of matchAll() to avoid the --downlevelIteration requirement.
+  const re = /```mermaid\n([\s\S]*?)```/g
+  const blocks: string[] = []
+  let match: RegExpExecArray | null
+  while ((match = re.exec(markdown)) !== null) {
+    blocks.push(match[1].trim())
+  }
+  return blocks
 }
 
 /**
@@ -53,8 +60,11 @@ function extractMermaidBlocks(markdown: string): string[] {
  *   fallback → dark red bg, red border + text (fallback responses)
  */
 function applyTerminalTheme(mermaid: string): string {
+  // Strip step identifiers (e.g. "A1 ", "B12 ") from quoted node label strings
+  const withoutIds = mermaid.replace(/"[A-Z]\d+ /g, '"')
+
   // Strip all existing classDef and class assignment lines
-  const stripped = mermaid
+  const stripped = withoutIds
     .split('\n')
     .filter((line) => !/^\s*(classDef|class )\s/.test(line))
     .join('\n')

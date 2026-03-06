@@ -33,6 +33,163 @@ interface Props {
   queryMermaid: string
 }
 
+// ── Tooltip types ─────────────────────────────────────────────────────────────
+
+interface TooltipState {
+  x: number
+  y: number
+  title: string
+  detail: string
+}
+
+// ── Node details map (keyed by Mermaid source node variable) ─────────────────
+// Each entry maps the SVG node ID (e.g. "A1", "D4") to human-readable tooltip
+// content. After mermaid.run() resolves, we attach mouseenter/mousemove/
+// mouseleave listeners to each g.node SVG element and show this on hover.
+
+const NODE_DETAILS: Record<string, { title: string; detail: string }> = {
+  // ── Ingestion pipeline ────────────────────────────────────────────────────
+  A1: {
+    title: 'Scan COBOL corpus',
+    detail: '577 .cob/.cbl files from gnucobol-contrib\nfile_scanner.py collects path, size, mtime',
+  },
+  A2: {
+    title: 'Detect boundaries',
+    detail:
+      'chunker.py: scan for PROCEDURE DIVISION\nthen named paragraph labels:\n  single uppercase token + period, alone on line\nSECTION headers also detected',
+  },
+  D1: {
+    title: 'Boundary found?',
+    detail:
+      'Named paragraphs/sections in PROCEDURE DIVISION?\nYES → semantic chunks\nNO  → 50-line fallback windows',
+  },
+  A3: {
+    title: 'Semantic chunks',
+    detail:
+      'One chunk per named paragraph or SECTION\nSpan: label line → next boundary\nVector ID: file_path::PARAGRAPH-NAME',
+  },
+  A4: {
+    title: 'Fallback chunks',
+    detail:
+      '50-line sliding windows · 10-line overlap\nis_fallback=True in metadata\nVector ID: file_path::chunk_N\nNo Q&A framing applied',
+  },
+  A5: {
+    title: 'Quality filter',
+    detail:
+      'chunk_filter.py — must pass BOTH checks:\n① ≥4 non-trivial lines\n  (strip label, comments, blanks, separators)\n② ≥1 logic verb:\n  MOVE · COMPUTE · PERFORM · IF · EVALUATE\n  READ · WRITE · CALL · ADD · SUBTRACT ...',
+  },
+  D2: {
+    title: 'Pass filter?',
+    detail:
+      'Chunk passes quality gate?\nYES → embed\nNO  → drop + log\nRejection: 50–86% on DB2/PostgreSQL files\n(exit trampolines account for ~50% of chunks)',
+  },
+  A6: {
+    title: 'Drop + log',
+    detail:
+      'Chunk rejected — not indexed\nLogged: file path + paragraph name\nCommon rejects:\n  EXIT. trampolines\n  single-line constants\n  HTML stubs ("<BR>")',
+  },
+  D3: {
+    title: 'Q&A signal?',
+    detail:
+      'Meaningful inline comment found?\n(*> free-format or column-7 *)\nYES → build Q&A text (+0.10 cosine boost)\nNO  → embed raw code',
+  },
+  A7: {
+    title: 'Build Q&A text',
+    detail:
+      '"What does PARA do?\\nThe PARA..."\nBuilt from paragraph name + first *> comment\nCosine boost: ~0.69 → 0.77–0.82\nEmbedding-only; raw code stored in metadata',
+  },
+  A8: {
+    title: 'Raw chunk text',
+    detail: 'No Q&A enrichment\nRaw COBOL embedded as-is\nTypical scores: 0.45–0.55 for NL queries',
+  },
+  A9: {
+    title: 'Embed document',
+    detail:
+      'Model: voyage-code-2\ninput_type="document" · 1536 dims\n$0.06/1M tokens · ~165ms p50\nTrained on NL ↔ code pairs\n(text-embedding-3-small scored 0.25–0.34 on COBOL)',
+  },
+  A10: {
+    title: 'Vector ID',
+    detail:
+      'Named: file_path::PARAGRAPH-NAME\nFallback: file_path::chunk_N\nGuaranteed unique per Pinecone index',
+  },
+  A11: {
+    title: 'Upsert Pinecone',
+    detail:
+      'Serverless Pinecone · cosine · 1536 dims\nMetadata: file_path, paragraph_name,\n  start_line, end_line, content,\n  chunk_index, is_fallback\nnull → "" (Pinecone rejects null values)\n10,029 vectors indexed (gnucobol-contrib)',
+  },
+  // ── Query pipeline ────────────────────────────────────────────────────────
+  B1: {
+    title: 'User query',
+    detail:
+      'Plain-English question about the COBOL codebase\ne.g. "How do I calculate interest?"\nAuthenticated via GitHub OAuth + JWT',
+  },
+  B2: {
+    title: 'query_enrich()',
+    detail:
+      'Append " COBOL" if "cobol" absent (case-insensitive)\nFix for synonym gap:\n  "process" → retrieves "parse" paragraphs\nNo other enrichment in current impl',
+  },
+  B3: {
+    title: 'Embed query',
+    detail:
+      'Model: voyage-code-2\ninput_type="query" (asymmetric retrieval)\n1536 dims · 165ms p50\nDifferent internal repr vs. document\n→ better recall vs. symmetric embedding',
+  },
+  B4: {
+    title: 'Pinecone top_k=5',
+    detail:
+      'Cosine ANN search\ntop_k=5 (reduced from 10 → saves 150–300ms)\nReturns: vector IDs + cosine scores + metadata\nPinecone latency: 72ms',
+  },
+  B5: {
+    title: 'Drop low cosine',
+    detail:
+      'Cosine threshold: 0.65\nCandidates below threshold dropped\nbefore reranking\nPrevents noisy chunks polluting results',
+  },
+  B6: {
+    title: 'Rerank 0.7/0.3',
+    detail:
+      'combined = 0.7 × cosine + 0.3 × keyword_overlap\nKeyword: query terms (stopwords removed,\n  hyphens split) found in chunk content\nCOBOL verbs NOT stopwords\n  (COMPUTE/PERFORM are valid signal)\nReranker: <1ms',
+  },
+  B7: {
+    title: 'SSE snippets event',
+    detail:
+      'snippets SSE event emitted to client\nTop-5 ranked results with:\n  file path · paragraph name\n  line numbers · combined score\nShown in UI before LLM answer arrives',
+  },
+  B8: {
+    title: 'Confidence metrics',
+    detail:
+      'top_score = highest snippet combined score\navg_similarity = mean cosine score (top-5)\nInput to confidence gate\nTypical range: 0.56–0.82',
+  },
+  D4: {
+    title: 'Confidence gate?',
+    detail:
+      'top_score ≥ 0.66 AND avg_similarity ≥ 0.60\nYES → send to LLM\nNO  → fallback response\nPrevents hallucination on weakly-grounded\nretrieval (no LLM call → saves cost)',
+  },
+  B9: {
+    title: 'Fallback response',
+    detail:
+      '"I don\'t have enough relevant code context..."\nNo LLM call (saves latency + cost)\nNormal done SSE event still emitted\nfor observability',
+  },
+  B10: {
+    title: 'Keep top 3',
+    detail:
+      'Context pruning: top-3 chunks → LLM\n(top-5 still shown in UI)\nCuts input tokens ~40%\nReduces TTFT without accuracy loss\n(reranker already ranked best-first)',
+  },
+  B11: {
+    title: 'Generate answer',
+    detail:
+      'GPT-4o-mini · stream=True · max_tokens=100\ntemperature=0.1 · p50: 2,274ms\nSystem prompt enforces citation:\n  file + paragraph + line in answer',
+  },
+  B12: {
+    title: 'SSE tokens',
+    detail:
+      'Token-by-token streaming via SSE\nClient appends tokens in real-time\nFirst token typically <500ms after retrieval\nNone delta.content chunks skipped',
+  },
+  B13: {
+    title: 'SSE done + metrics',
+    detail:
+      'Final done SSE event\nLatency breakdown:\n  embed: 165ms · retrieve: 72ms\n  rerank: <1ms · LLM: 2,274ms\nSimilarity metrics for the query',
+  },
+}
+
 // ── Metrics (sourced from RAG_ARCHITECTURE.md corpus stats) ──────────────────
 
 const METRICS = [
@@ -83,6 +240,7 @@ const MERMAID_CONFIG = {
 export function ArchitectureDiagram({ ingestionMermaid, queryMermaid }: Props): React.JSX.Element {
   const [activePipeline, setActivePipeline] = useState<Pipeline>('ingestion')
   const [renderKey, setRenderKey] = useState(0)
+  const [tooltip, setTooltip] = useState<TooltipState | null>(null)
   const containerRef = useRef<HTMLDivElement>(null)
 
   // Both strings empty → the markdown file wasn't found or had no Mermaid blocks
@@ -99,6 +257,8 @@ export function ArchitectureDiagram({ ingestionMermaid, queryMermaid }: Props): 
 
   // Dynamic import of mermaid (browser-only). Re-runs whenever renderKey changes
   // (i.e., on every tab switch) to re-render the new diagram string.
+  // After mermaid.run() resolves, we attach hover listeners to each g.node SVG
+  // element so the tooltip fires with rich detail on mouseenter.
   useEffect(() => {
     if (!hasContent || !activeMermaid) return
     if (typeof window === 'undefined') return
@@ -111,11 +271,45 @@ export function ArchitectureDiagram({ ingestionMermaid, queryMermaid }: Props): 
       // mermaid.run() looks for all .mermaid divs in the DOM and renders them.
       // The querySelector scopes it to only the div we care about so other
       // potential mermaid elements on the page are not disturbed.
-      void m.default.run({ querySelector: '.mermaid' })
+      void m.default
+        .run({ querySelector: '.mermaid' })
+        .then(() => {
+          if (cancelled) return
+          const container = containerRef.current
+          if (!container) return
+          // Mermaid renders each node as <g class="node" id="flowchart-A1-0">.
+          // Extract the source node variable (A1, D4, B13...) from the ID to
+          // look up rich tooltip content.
+          container.querySelectorAll('g.node').forEach((nodeEl) => {
+            const nodeId = nodeEl.id.match(/flowchart-([A-Z]\d+)-\d+/)?.[1]
+            const info = nodeId ? NODE_DETAILS[nodeId] : undefined
+            if (!info) return
+            nodeEl.addEventListener('mouseenter', (e) => {
+              if (cancelled) return
+              const { clientX, clientY } = e as MouseEvent
+              setTooltip({ x: clientX, y: clientY, ...info })
+            })
+            nodeEl.addEventListener('mousemove', (e) => {
+              if (cancelled) return
+              setTooltip((prev) =>
+                prev
+                  ? { ...prev, x: (e as MouseEvent).clientX, y: (e as MouseEvent).clientY }
+                  : null
+              )
+            })
+            nodeEl.addEventListener('mouseleave', () => {
+              if (!cancelled) setTooltip(null)
+            })
+          })
+        })
+        .catch(() => {
+          // Ignore mermaid render errors — diagram just won't display
+        })
     })
 
     return (): void => {
       cancelled = true
+      setTooltip(null)
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [renderKey])
@@ -220,6 +414,25 @@ export function ArchitectureDiagram({ ingestionMermaid, queryMermaid }: Props): 
           </table>
         </div>
       </div>
+
+      {/* ── Hover tooltip ────────────────────────────────────────────────────── */}
+      {tooltip !== null && (
+        <div
+          className="pointer-events-none rounded border border-terminal-accent/40 bg-terminal-bg/95 p-3 text-xs shadow-xl"
+          style={{
+            position: 'fixed',
+            left: tooltip.x + 14,
+            top: tooltip.y + 14,
+            maxWidth: '17rem',
+            zIndex: 9999,
+          }}
+        >
+          <p className="mb-1.5 font-semibold text-terminal-accent">{tooltip.title}</p>
+          <p className="whitespace-pre-line leading-relaxed text-terminal-muted">
+            {tooltip.detail}
+          </p>
+        </div>
+      )}
     </div>
   )
 }

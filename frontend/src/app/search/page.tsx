@@ -1052,6 +1052,14 @@ export default function SearchPage(): React.JSX.Element {
             </button>
           </div>
         </form>
+        <div className="mb-6 flex justify-end">
+          <Link
+            href="/architecture"
+            className="rounded border border-terminal-border px-3 py-1 font-mono text-xs text-terminal-muted transition-all hover:border-terminal-accent hover:text-terminal-accent"
+          >
+            system architecture
+          </Link>
+        </div>
 
         {/* ── Example queries (shown when idle) ─────────────────────────── */}
         {!hasResults && !loading && (

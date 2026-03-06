@@ -147,3 +147,45 @@ body {
 input:focus {
   outline: none;
 }
+
+/* ── Mermaid terminal overrides ─────────────────────────────────────────────── */
+/* Mermaid renders its own SVG. These overrides apply terminal-aesthetic styles
+   to the generated markup so the diagram matches the LegacyLens CRT theme.    */
+
+.mermaid-terminal svg {
+  background: transparent !important;
+  font-family: 'JetBrains Mono', 'Fira Code', monospace !important;
+  max-width: 100%;
+  height: auto;
+  animation: fadeIn 0.4s ease-out;
+}
+
+/* Edge label backgrounds (YES / NO / condition text on arrows) */
+.mermaid-terminal .edgeLabel,
+.mermaid-terminal .edgeLabel p {
+  background-color: #0a0a0a !important;
+  color: #6b7280 !important;
+  font-size: 11px !important;
+}
+
+/* Cluster / subgraph backgrounds */
+.mermaid-terminal .cluster rect {
+  fill: #111111 !important;
+  stroke: #1f1f1f !important;
+}
+
+/* Arrowhead markers */
+.mermaid-terminal .marker {
+  fill: #00ff88 !important;
+}
+
+/* Make the overall SVG container scrollable on small screens */
+.mermaid-terminal {
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+}
+
+/* Indicate nodes are hoverable */
+.mermaid-terminal g.node {
+  cursor: help;
+}

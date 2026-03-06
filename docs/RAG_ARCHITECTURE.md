@@ -95,6 +95,168 @@ For a file with N real sections this yields N real chunks + N trampoline chunks 
 
 ## Retrieval Pipeline
 
+```mermaid
+%%{init: {'flowchart': {'htmlLabels': false, 'nodeSpacing': 30, 'rankSpacing': 45, 'curve': 'linear'}}}%%
+flowchart TB
+    A1["A1 Scan COBOL corpus"] --> A2["A2 Detect boundaries"]
+    A2 --> D1{"A3 Boundary found?"}
+    D1 -->|Yes| A3["A4 Semantic chunks"]
+    D1 -->|No| A4["A5 Fallback chunks"]
+    A3 --> A5["A6 Quality filter"]
+    A4 --> A5
+    A5 --> D2{"A7 Pass filter?"}
+    D2 -->|No| A6["A8 Drop + log"]
+    D2 -->|Yes| D3{"A9 Q&A signal?"}
+    D3 -->|Yes| A7["A10 Build Q&A text"]
+    D3 -->|No| A8["A11 Raw chunk text"]
+    A7 --> A9["A12 Embed document"]
+    A8 --> A9
+    A9 --> A10["A13 Vector ID"]
+    A10 --> A11["A14 Upsert Pinecone"]
+
+    classDef proc fill:#ecfeff,stroke:#0891b2,color:#0c4a6e,stroke-width:1px;
+    classDef gate fill:#fff7ed,stroke:#ea580c,color:#7c2d12,stroke-width:1px;
+    classDef drop fill:#fef2f2,stroke:#dc2626,color:#7f1d1d,stroke-width:1px;
+    class A1,A2,A3,A4,A5,A7,A8,A9,A10,A11 proc;
+    class D1,D2,D3 gate;
+    class A6 drop;
+```
+
+```mermaid
+%%{init: {'flowchart': {'htmlLabels': false, 'nodeSpacing': 30, 'rankSpacing': 45, 'curve': 'linear'}}}%%
+flowchart TB
+    B1["B1 User query"] --> B2["B2 query_enrich()"]
+    B2 --> B3["B3 Embed query"]
+    B3 --> B4["B4 Pinecone top_k=5"]
+    B4 --> B5["B5 Drop low cosine"]
+    B5 --> B6["B6 Rerank 0.7/0.3"]
+    B6 --> B7["B7 SSE snippets"]
+    B7 --> B8["B8 Confidence metrics"]
+    B8 --> D4{"B9 Confidence gate?"}
+    D4 -->|No| B9["B10 Fallback response"]
+    D4 -->|Yes| B10["B11 Keep top 3"]
+    B10 --> B11["B12 Generate answer"]
+    B11 --> B12["B13 SSE tokens"]
+    B9 --> B13["B14 SSE done + metrics"]
+    B12 --> B13
+
+    classDef proc fill:#ecfeff,stroke:#0891b2,color:#0c4a6e,stroke-width:1px;
+    classDef gate fill:#fff7ed,stroke:#ea580c,color:#7c2d12,stroke-width:1px;
+    classDef event fill:#f0fdf4,stroke:#16a34a,color:#14532d,stroke-width:1px;
+    classDef fallback fill:#fef2f2,stroke:#dc2626,color:#7f1d1d,stroke-width:1px;
+    class B1,B2,B3,B4,B5,B6,B8,B10,B11 proc;
+    class D4 gate;
+    class B7,B12,B13 event;
+    class B9 fallback;
+```
+
+### Plain-text diagram (works without Mermaid)
+
+```text
+LEGEND:
+  [step]   = processing step
+  <check?> = decision gate
+  ==>      = output event shown in UI/client
+
+==========================================================================
+LANE A: INGESTION (offline / re-indexing)
+==========================================================================
+
+[A1] Scan COBOL files + metadata
+  |
+  v
+[A2] Chunker: detect PROCEDURE DIVISION paragraph/section boundaries
+  |
+  v
+<A3 paragraphs/sections found?>
+  |YES                                      |NO
+  v                                         v
+[A4] Build semantic chunks                  [A5] Fallback chunks
+     (paragraph_name + line spans)               (50-line windows + 10 overlap, is_fallback=True)
+  \____________________________________   ___________________________________/
+                                       \ /
+                                        v
+[A6] Chunk quality filter
+     - non-trivial lines >= threshold
+     - contains logic verb (MOVE/COMPUTE/PERFORM/IF/...)
+  |
+  v
+<A7 pass filter?>
+  |NO                                       |YES
+  v                                         v
+[A8] Drop chunk + log rejection             <A9 add Q&A framing?>
+                                               |YES (meaningful comment/signal)  |NO
+                                               v                                 v
+                                            [A10] Build Q&A text                [A11] Use raw chunk text
+                                            (embedding-only; raw code kept)          (no enrichment)
+                                               \_____________________________________/
+                                                                |
+                                                                v
+                                                     [A12] Embed chunk
+                                                          model=voyage-code-2
+                                                          input_type=document
+                                                                |
+                                                                v
+                                                     [A13] Vector ID
+                                                          file::PARAGRAPH or file::chunk_N
+                                                                |
+                                                                v
+                                                     [A14] Upsert Pinecone
+                                                          cosine, 1536 dims
+                                                          optional null-like metadata -> empty string
+
+
+==========================================================================
+LANE B: QUERY (online / per user request)
+==========================================================================
+
+[B1] User natural-language query
+  |
+  v
+[B2] query_enrich(): append "COBOL" if missing (case-insensitive)
+  |
+  v
+[B3] Embed query
+     model=voyage-code-2, input_type=query
+  |
+  v
+[B4] Pinecone.query(): top_k=5 (cosine)
+  |
+  v
+[B5] Drop candidates below cosine floor
+  |
+  v
+[B6] rerank()
+     combined_score = 0.7 * cosine + 0.3 * keyword_overlap
+     keyword normalization: stopword removal + hyphen splitting
+     COBOL verbs intentionally kept as signal
+  |
+  v
+[B7] ==> snippets SSE event (top 5 shown in UI)
+  |
+  v
+[B8] Compute confidence metrics: top_score + avg_similarity
+  |
+  v
+<B9 confidence gate: top_score >= 0.66 AND avg_similarity >= 0.60 ?>
+  |NO                                       |YES
+  v                                         v
+[B10] Fallback answer                       [B11] Context prune for generation
+      "not enough relevant context"              send top 3 chunks to LLM
+  |                                         |
+  |                                         v
+  |                                      [B12] generate_answer()
+  |                                            GPT-4o-mini, stream=True, max_tokens=100
+  |                                         |
+  |                                         v
+  |                                      [B13] ==> token SSE stream
+  |_________________________________________/
+                    |
+                    v
+             [B14] ==> done SSE event
+                   latency breakdown + similarity metrics
+```
+
 ```
 User query
   → query_enrich()         append "COBOL" if missing (case-insensitive)

@@ -175,5 +175,13 @@
     "expected_file_pattern": "GCSORT",
     "min_score": 0.65,
     "category": "code_explanation"
+  },
+  {
+    "id": "gq-022",
+    "query": "how to run SQL queries in COBOL",
+    "expected_paragraph": null,
+    "expected_file_pattern": "PGMOD5",
+    "min_score": 0.60,
+    "category": "code_explanation"
   }
 ]

@@ -26,8 +26,13 @@ const config: Config = {
 
   // Map the @ import alias to the src/ directory
   // This lets tests use: import { foo } from '@/lib/api' instead of '../../lib/api'
+  // mermaid is ESM-only (type: "module") and cannot be loaded by Jest's CommonJS
+  // runtime. Redirect it to a hand-written CJS-compatible manual mock so all
+  // tests that need mermaid get a predictable jest.fn() stub without any real
+  // browser-rendering code.
   moduleNameMapper: {
     '^@/(.*)$': '<rootDir>/src/$1',
+    '^mermaid$': '<rootDir>/src/__mocks__/mermaid.ts',
   },
 
   // Find test files in __tests__ directories or files ending in .test.ts(x)
