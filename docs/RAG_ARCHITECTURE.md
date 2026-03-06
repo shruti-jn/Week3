@@ -18,7 +18,7 @@
 
 **Final model:** Voyage AI `voyage-code-2` (1536 dimensions).
 
-**Why not OpenAI `text-embedding-3-small`:** The initial model. Scored 0.25–0.34 on COBOL queries — well below the 0.75 relevance threshold. The root cause: text-embedding-3-small was trained on natural language, not code. It cannot bridge "database connection" → `EXEC SQL CONNECT` or "encryption keys from a password" → a PC1/PC2 permutation table.
+**Why not OpenAI `text-embedding-3-small`:** The initial model. Scored 0.25–0.34 on COBOL queries — well below project relevance thresholds (historically 0.75, now 0.65). The root cause: text-embedding-3-small was trained on natural language, not code. It cannot bridge "database connection" → `EXEC SQL CONNECT` or "encryption keys from a password" → a PC1/PC2 permutation table.
 
 **Why voyage-code-2 wins:** Trained specifically on natural-language ↔ code pairs. On the four previously failing queries, voyage-code-2 scored +0.17 to +0.29 higher (0.46 → 0.74, 0.49 → 0.75, 0.63 → 0.83, 0.69 → 0.85). All four cleared their thresholds. Cost: 3× more per token ($0.06/1M vs $0.02/1M), but $0.05 total one-time re-index cost at our corpus size — negligible.
 
@@ -75,6 +75,22 @@ A chunk must pass **both** checks to be indexed:
 
 This is general — it doesn't enumerate specific patterns. Any chunk without real logic fails, regardless of its name. Applied in `embed_and_upsert()` before the Voyage API call. Filtered count is logged so ingestion output shows how many stubs were skipped.
 
+**Observed rejection rates during ingestion (gnucobol-contrib corpus):**
+
+DB2/PostgreSQL pattern files (PGSQLMSG, PGTEST1, etc.) see 50–80% stub rejection. This is expected, not a bug. The cause is the pervasive COBOL structured-programming idiom where every `SECTION` has a paired exit trampoline:
+
+```cobol
+FNC-CONNECT SECTION.       ← real logic → PASS (5 non-trivial lines, CALL verb)
+    INITIALIZE LN-MOD
+    ...
+    CALL "PGMOD1" ...
+    .
+FNC-CONNECT-EX.            ← trampoline → FAIL (1 line: EXIT.)
+    EXIT.
+```
+
+For a file with N real sections this yields N real chunks + N trampoline chunks — a structural 50% rejection floor. Short utility sections (e.g. `COPY-LN-MSG-IN-WS-MSG` with 1 `MOVE` line) push the rate higher. These are real code but not meaningfully searchable in isolation; the calling section (which `PERFORM`s them) is indexed and provides the same context. Concrete example from `PGTEST1.cob`: 4 of 10 procedure-division paragraphs kept, 6 filtered (all 5 `-EX` trampolines + 1 single-line utility).
+
 ---
 
 ## Retrieval Pipeline
@@ -122,6 +138,31 @@ If `top_score < 0.66` OR `avg_similarity < 0.60`, LegacyLens does **not** genera
 
 ---
 
+## Corpus Stats (gnucobol-contrib, 2026-03-05)
+
+| Metric | Value |
+|---|---|
+| COBOL files scanned | **577** |
+| Raw paragraphs/chunks produced | **10,029** |
+| Ingestion time (unfiltered, full corpus) | **1,332s (~22 min)** |
+| Vectors currently in Pinecone | **10,029** (unfiltered — filter threshold under review) |
+
+**Chunk quality filter — measured rejection rates (2026-03-05 filtered run, first 38 of 577 files):**
+
+| File | Raw chunks | Indexed | Rejected | Rate |
+|---|---|---|---|---|
+| DB2SQLMSG.cob (×7 copies) | 6 each | 2 each | 4 each | **67%** |
+| DB2TEST7.cob | 36 | 18 | 18 | **50%** |
+| PGMOD3.cbl | 35 | 5 | 30 | **86%** |
+| PGMOD4.cbl | 46 | 11 | 35 | **76%** |
+| PGMOD5.cbl | 56 | 15 | 41 | **73%** |
+| PGMOD6.cbl | 120 | 24 | 96 | **80%** |
+| PGMOD7.cbl | 192 | 41 | 151 | **79%** |
+
+**Concern:** Rejection rates of 67–86% on DB2/PostgreSQL DAL files suggest `_MIN_NON_TRIVIAL_LINES = 4` is too aggressive. These files use many valid single-statement I/O paragraphs (e.g., `EXEC SQL OPEN cursor END-EXEC.`) that fail the 4-line check even though they pass the logic-verb check. Pure `EXIT.` trampolines and bare constant stubs (the original targets) only need 1 non-trivial line to identify. The current Pinecone index uses the full unfiltered corpus while the threshold is reconsidered. Proposed fix: lower threshold to **2 non-trivial lines** — still catches all 1-line stubs while preserving short-but-real I/O paragraphs.
+
+---
+
 ## Performance Results
 
 | Stage | Before optimization | After optimization |
@@ -146,7 +187,7 @@ If `top_score < 0.66` OR `avg_similarity < 0.60`, LegacyLens does **not** genera
 | text-embedding-3-small, plain code | 0/10 | 0% | Baseline |
 | + Q&A framing | 5/10 | 50% | Q&A embedding format |
 | + voyage-code-2 | 9/10 (projected) | ~90% | Model swap |
-| + chunk quality filter | TBD post re-index | Expected improvement | Stub chunks removed |
+| + chunk quality filter (threshold=4) | not measured — too aggressive | TBD | Filter under revision |
 
 **Representative scores after voyage-code-2 + Q&A:**
 
