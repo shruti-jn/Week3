@@ -98,8 +98,21 @@ class Settings(BaseSettings):
     # Minimum similarity score to consider a chunk "relevant enough" to answer from.
     # Below this threshold, we return a fallback — no answer beats a wrong one.
     similarity_threshold: float = Field(
-        default=0.75,
+        default=0.65,
         description="Minimum Pinecone similarity score to use a chunk (0.0 to 1.0)",
+    )
+    # Additional confidence gate before answer generation:
+    # even when chunks pass similarity_threshold, we still fallback if
+    # retrieval confidence is weak overall.
+    answer_gate_top_score_min: float = Field(
+        default=0.66,
+        description="Minimum top snippet score required to generate an answer",
+    )
+    answer_gate_avg_similarity_min: float = Field(
+        default=0.60,
+        description=(
+            "Minimum average snippet similarity required to generate an answer"
+        ),
     )
 
     # ── Langfuse Observability (optional) ─────────────────────────────────
