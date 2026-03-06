@@ -42,6 +42,10 @@ logger = logging.getLogger(__name__)
 
 # Required metadata keys for RankedResult -> CodeSnippet. Skip results missing any.
 _REQUIRED_META = ("file_path", "start_line", "end_line", "content")
+LOW_CONFIDENCE_RESPONSE = (
+    "I don't have enough relevant code context to answer that confidently. "
+    "Try rephrasing your question or asking about a specific file or paragraph."
+)
 
 
 # -- Langfuse tracing helpers --------------------------------------------------
@@ -265,9 +269,10 @@ async def stream_query_sse(
     try:
         # 1. Embed query -- Voyage voyage-code-2 with input_type="query" for
         # asymmetric retrieval (query vs document embeddings differ by design).
+        enriched_query = query if "cobol" in query.lower() else f"{query} COBOL"
         t0 = _now_ms()
         embed_span = tracer.span("embed", {"query": query})
-        embedding = await embed_query(query, voyage_client)
+        embedding = await embed_query(enriched_query, voyage_client)
         embed_ms = round(_now_ms() - t0, 2)
         embed_span.end({"embed_ms": embed_ms, "dims": len(embedding)})
 
@@ -315,29 +320,49 @@ async def stream_query_sse(
         snippets_payload = [s.model_dump() for s in snippets]
         yield _sse_event("snippets", snippets_payload)
 
-        # 6. Stream answer tokens -- measure total LLM time
-        t0 = _now_ms()
-        llm_span = tracer.span(
-            "generate_answer",
-            {"model": "gpt-4o-mini", "chunks": len(snippets)},
-        )
-        # Pass only the top 3 snippets to the LLM — the remaining context
-        # cuts input tokens by ~40%, reducing TTFT on GPT-4o-mini without
-        # meaningful accuracy loss (reranker already ranked best-first).
-        llm_snippets = snippets[:3]
-        async for token in generate_answer(query, llm_snippets, openai_client):
-            # One data line per event so SSE parsers that keep only the last
-            # data line work correctly.
-            token_one_line = token.replace("\n", " ").replace("\r", " ")
-            yield _sse_event("token", token_one_line)
-        llm_ms = round(_now_ms() - t0, 2)
-        llm_span.end({"llm_ms": llm_ms})
-
-        # 7. Compute per-query analytics from the returned snippets
+        # 6. Compute per-query analytics from the returned snippets
         scores = [s.score for s in snippets]
         top_score = round(max(scores), 4) if scores else 0.0
         avg_similarity = round(sum(scores) / len(scores), 4) if scores else 0.0
         files_hit = len({s.file_path for s in snippets})
+
+        # 7. Confidence gate before answer generation.
+        # This is stricter than retrieval min_score: we may have snippets, but if
+        # confidence is still weak we prefer a safe fallback over a broad answer.
+        weak_retrieval = bool(snippets) and (
+            top_score < settings.answer_gate_top_score_min
+            or avg_similarity < settings.answer_gate_avg_similarity_min
+        )
+
+        llm_ms = 0.0
+        if weak_retrieval:
+            logger.info(
+                "query_pipeline: weak retrieval confidence (top=%.4f avg=%.4f); "
+                "returning fallback",
+                top_score,
+                avg_similarity,
+            )
+            yield _sse_event("token", LOW_CONFIDENCE_RESPONSE)
+        else:
+            # 8. Stream answer tokens -- measure total LLM time
+            t0 = _now_ms()
+            llm_span = tracer.span(
+                "generate_answer",
+                {"model": "gpt-4o-mini", "chunks": len(snippets)},
+            )
+            # Pass only the top 3 snippets to the LLM — the remaining context
+            # cuts input tokens by ~40%, reducing TTFT on GPT-4o-mini without
+            # meaningful accuracy loss (reranker already ranked best-first).
+            llm_snippets = snippets[:3]
+            async for token in generate_answer(query, llm_snippets, openai_client):
+                # One data line per event so SSE parsers that keep only the last
+                # data line work correctly.
+                token_one_line = token.replace("\n", " ").replace("\r", " ")
+                yield _sse_event("token", token_one_line)
+            llm_ms = round(_now_ms() - t0, 2)
+            llm_span.end({"llm_ms": llm_ms})
+
+        # 9. Emit done event with metrics
         total_ms = round(_now_ms() - t_start, 2)
 
         done_payload: dict[str, Any] = {

@@ -264,7 +264,7 @@ async def test_query_snippet_fields_are_correct(test_client: AsyncClient) -> Non
     The conftest mock_pinecone_client returns two results:
     - loan-calc.cob::CALCULATE-INTEREST (score 0.92)
     - payroll.cob::COMPUTE-TAX (score 0.81)
-    Both are above the 0.75 threshold so both should appear.
+    Both are above the 0.65 threshold so both should appear.
     """
     _, _, body = await _collect_response(test_client)
     events = parse_sse_events(body)
@@ -307,8 +307,43 @@ async def test_query_event_order_is_snippets_tokens_done(
     assert all(t == "token" for t in middle), f"Middle events should be tokens, got: {middle}"
 
 
+@pytest.mark.asyncio
+async def test_query_appends_cobol_before_embedding_when_missing(
+    test_client: AsyncClient,
+    mock_voyage_client: MagicMock,
+) -> None:
+    """
+    Query text sent to Voyage is enriched with " COBOL" when it is missing.
+
+    Most user queries omit the language name because they are already in a
+    COBOL-specific tool. Appending COBOL gives the embedder stronger context.
+    """
+    status, _, _ = await _collect_response(test_client, query="how to sort a file")
+    assert status == 200
+    mock_voyage_client.embed.assert_called_once()
+    embedded_texts = mock_voyage_client.embed.call_args.args[0]
+    assert embedded_texts == ["how to sort a file COBOL"]
+
+
+@pytest.mark.asyncio
+async def test_query_does_not_append_cobol_when_already_present(
+    test_client: AsyncClient,
+    mock_voyage_client: MagicMock,
+) -> None:
+    """
+    Query text sent to Voyage is unchanged when COBOL already appears.
+
+    The check is case-insensitive so "CoBoL" should not get duplicated.
+    """
+    status, _, _ = await _collect_response(test_client, query="how does CoBoL sort work")
+    assert status == 200
+    mock_voyage_client.embed.assert_called_once()
+    embedded_texts = mock_voyage_client.embed.call_args.args[0]
+    assert embedded_texts == ["how does CoBoL sort work"]
+
+
 # ─────────────────────────────────────────────────────────────────────────────
-# Empty results path (no COBOL code above the 0.75 threshold)
+# Empty results path (no COBOL code above the 0.65 threshold)
 # ─────────────────────────────────────────────────────────────────────────────
 
 
@@ -326,6 +361,59 @@ async def empty_results_client(
     - answer contains the fallback message (not an LLM call)
     """
     app = _make_app_with_overrides(mock_voyage_client, mock_openai_client, mock_pinecone_empty)
+    async with AsyncClient(
+        transport=ASGITransport(app=app),
+        base_url="http://test",
+    ) as ac:
+        yield ac
+
+
+@pytest.fixture
+async def weak_confidence_client(
+    mock_voyage_client: MagicMock,
+    mock_openai_client: AsyncMock,
+) -> AsyncGenerator[AsyncClient, None]:
+    """
+    Test client where retrieval returns borderline snippets (not empty) so the
+    confidence gate should fallback before calling the LLM.
+    """
+    weak_pinecone = MagicMock()
+    weak_index = MagicMock()
+
+    def mock_weak_query(**kwargs: object) -> Any:
+        response = MagicMock()
+        response.matches = [
+            MagicMock(
+                id="programs/weak-a.cob::PARA-A",
+                score=0.6550,
+                metadata={
+                    "file_path": "programs/weak-a.cob",
+                    "paragraph_name": "PARA-A",
+                    "start_line": 10,
+                    "end_line": 20,
+                    "content": "PARA-A.\n    MOVE 1 TO WS-A.",
+                    "division": "PROCEDURE",
+                },
+            ),
+            MagicMock(
+                id="programs/weak-b.cob::PARA-B",
+                score=0.6510,
+                metadata={
+                    "file_path": "programs/weak-b.cob",
+                    "paragraph_name": "PARA-B",
+                    "start_line": 30,
+                    "end_line": 40,
+                    "content": "PARA-B.\n    MOVE 2 TO WS-B.",
+                    "division": "PROCEDURE",
+                },
+            ),
+        ]
+        return response
+
+    weak_index.query = mock_weak_query
+    weak_pinecone.Index = MagicMock(return_value=weak_index)
+
+    app = _make_app_with_overrides(mock_voyage_client, mock_openai_client, weak_pinecone)
     async with AsyncClient(
         transport=ASGITransport(app=app),
         base_url="http://test",
@@ -385,6 +473,36 @@ async def test_query_no_results_still_has_done_event(
     events = parse_sse_events(body)
     done_events = [e for e in events if e.get("event") == "done"]
     assert len(done_events) == 1
+
+
+@pytest.mark.asyncio
+async def test_query_weak_retrieval_uses_confidence_gate_fallback(
+    weak_confidence_client: AsyncClient,
+    mock_openai_client: AsyncMock,
+) -> None:
+    """
+    Borderline retrieval scores should short-circuit to a fallback response.
+
+    This protects against broad generic answers when context quality is weak,
+    even if snippets are non-empty.
+    """
+    from app.core.query_pipeline import LOW_CONFIDENCE_RESPONSE
+
+    _, _, body = await _collect_response(
+        weak_confidence_client,
+        query="zzzxqv obscure probe term",
+    )
+    events = parse_sse_events(body)
+
+    token_events = [e for e in events if e.get("event") == "token"]
+    assert len(token_events) >= 1
+    assert LOW_CONFIDENCE_RESPONSE in "".join(e["data"] for e in token_events)
+
+    done_data = json.loads(next(e["data"] for e in events if e.get("event") == "done"))
+    assert done_data["llm_ms"] == 0.0
+    assert done_data["top_score"] < 0.66
+
+    mock_openai_client.chat.completions.create.assert_not_called()
 
 
 # ─────────────────────────────────────────────────────────────────────────────
