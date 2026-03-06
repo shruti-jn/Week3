@@ -36,6 +36,17 @@ from app.core.retrieval.pinecone_client import PineconeWrapper
 # Fixtures -- shared helpers
 # ─────────────────────────────────────────────────────────────────────────────
 
+# Minimal COBOL paragraph content that passes the chunk quality filter.
+# Needs ≥4 non-trivial body lines and at least one logic verb.
+_INDEXABLE_CONTENT = (
+    "CALCULATE-INTEREST.\n"
+    "    MOVE WS-PRINCIPAL TO WS-TEMP.\n"
+    "    COMPUTE WS-INTEREST = WS-TEMP * WS-RATE.\n"
+    "    IF WS-INTEREST > 0\n"
+    "        MOVE WS-INTEREST TO WS-RESULT\n"
+    "    END-IF."
+)
+
 
 def make_chunk(
     file_path: str = "programs/loan-calc.cob",
@@ -392,7 +403,7 @@ async def test_embed_query_returns_first_embedding_from_response() -> None:
 
 async def test_embed_and_upsert_happy_path_returns_vector_count() -> None:
     """embed_and_upsert returns the number of vectors stored in Pinecone."""
-    chunks = [make_chunk(chunk_index=i) for i in range(3)]
+    chunks = [make_chunk(content=_INDEXABLE_CONTENT, chunk_index=i) for i in range(3)]
     voyage_client = make_mock_voyage()
     pinecone_wrapper = make_mock_pinecone_wrapper(upsert_return=3)
 
@@ -416,7 +427,8 @@ async def test_embed_and_upsert_empty_list_returns_zero_without_api_calls() -> N
 async def test_embed_and_upsert_passes_all_vectors_to_pinecone() -> None:
     """embed_and_upsert calls upsert_batch with a vector for every chunk."""
     chunks = [
-        make_chunk(paragraph_name=f"PARA-{i}", chunk_index=i) for i in range(5)
+        make_chunk(content=_INDEXABLE_CONTENT, paragraph_name=f"PARA-{i}", chunk_index=i)
+        for i in range(5)
     ]
     voyage_client = make_mock_voyage()
     pinecone_wrapper = make_mock_pinecone_wrapper(upsert_return=5)
@@ -430,7 +442,7 @@ async def test_embed_and_upsert_passes_all_vectors_to_pinecone() -> None:
 
 async def test_embed_and_upsert_single_chunk() -> None:
     """Single chunk flow works end-to-end."""
-    chunks = [make_chunk()]
+    chunks = [make_chunk(content=_INDEXABLE_CONTENT)]
     voyage_client = make_mock_voyage()
     pinecone_wrapper = make_mock_pinecone_wrapper(upsert_return=1)
 
@@ -438,6 +450,51 @@ async def test_embed_and_upsert_single_chunk() -> None:
 
     assert count == 1
     pinecone_wrapper.upsert_batch.assert_called_once()
+
+
+async def test_embed_and_upsert_filters_stub_chunks() -> None:
+    """Stub chunks are excluded by filter_chunks; only real chunks are embedded."""
+    real_chunk = make_chunk(
+        content=(
+            "CALC-INTEREST.\n"
+            "    MOVE WS-PRINCIPAL TO WS-TEMP.\n"
+            "    COMPUTE WS-INTEREST = WS-TEMP * WS-RATE.\n"
+            "    IF WS-INTEREST > 0\n"
+            "        MOVE WS-INTEREST TO WS-RESULT\n"
+            "    END-IF."
+        ),
+        paragraph_name="CALC-INTEREST",
+        chunk_index=0,
+    )
+    stub_chunk = make_chunk(
+        content="PARA-EX.\n    EXIT.",
+        paragraph_name="PARA-EX",
+        chunk_index=1,
+    )
+    voyage_client = make_mock_voyage()
+    pinecone_wrapper = make_mock_pinecone_wrapper(upsert_return=1)
+
+    count = await embed_and_upsert([real_chunk, stub_chunk], voyage_client, pinecone_wrapper)
+
+    # Only 1 real chunk embedded; stub is filtered out
+    assert count == 1
+    call_args = pinecone_wrapper.upsert_batch.call_args
+    vectors_passed = call_args.args[0]
+    assert len(vectors_passed) == 1
+
+
+async def test_embed_and_upsert_all_filtered_returns_zero() -> None:
+    """When all chunks are stubs, filter_chunks removes them all — 0 returned, no API calls."""
+    stub1 = make_chunk(content="PARA-EX.\n    EXIT.", paragraph_name="PARA-EX", chunk_index=0)
+    stub2 = make_chunk(content="PARA2-EX.\n    EXIT.", paragraph_name="PARA2-EX", chunk_index=1)
+    voyage_client = make_mock_voyage()
+    pinecone_wrapper = make_mock_pinecone_wrapper(upsert_return=0)
+
+    count = await embed_and_upsert([stub1, stub2], voyage_client, pinecone_wrapper)
+
+    assert count == 0
+    voyage_client.embed.assert_not_called()
+    pinecone_wrapper.upsert_batch.assert_not_called()
 
 
 # ─────────────────────────────────────────────────────────────────────────────

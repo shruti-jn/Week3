@@ -36,6 +36,7 @@ from typing import Any
 
 import voyageai
 
+from app.core.ingestion.chunk_filter import filter_chunks
 from app.core.ingestion.chunker import COBOLChunk
 from app.core.retrieval.pinecone_client import ChunkVector, PineconeWrapper
 
@@ -457,9 +458,24 @@ async def embed_and_upsert(
         logger.debug("embed_and_upsert: no chunks provided -- skipping")
         return 0
 
-    logger.info("embed_and_upsert: processing %d chunks", len(chunks))
+    # Filter out stub chunks (exit trampolines, constants, separators)
+    # before embedding — they degrade retrieval quality without adding value.
+    indexable = filter_chunks(chunks)
+    skipped = len(chunks) - len(indexable)
+    if skipped:
+        logger.info(
+            "embed_and_upsert: filtered %d stub chunks (kept %d/%d)",
+            skipped,
+            len(indexable),
+            len(chunks),
+        )
+    if not indexable:
+        logger.info("embed_and_upsert: no indexable chunks after filtering")
+        return 0
 
-    vectors = await embed_chunks(chunks, voyage_client, batch_size=batch_size)
+    logger.info("embed_and_upsert: processing %d chunks", len(indexable))
+
+    vectors = await embed_chunks(indexable, voyage_client, batch_size=batch_size)
     upserted = await pinecone_wrapper.upsert_batch(vectors)
 
     logger.info("embed_and_upsert: stored %d vectors in Pinecone", upserted)
