@@ -60,6 +60,12 @@ yarn-error.log*
 data/*
 !data/.gitkeep
 
+# ── Evaluation run outputs (local only — too large and ephemeral for git) ─────
+backend/eval_results/
+
+# ── Claude Code internal state ────────────────────────────────────────────────
+.claude/
+
 # ── Logs ──────────────────────────────────────────────────────────────────────
 *.log
 logs/
