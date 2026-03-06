@@ -61,7 +61,8 @@ data/*
 !data/.gitkeep
 
 # ── Evaluation run outputs (local only — too large and ephemeral for git) ─────
-backend/eval_results/
+backend/eval_results/*
+!backend/eval_results/prod_deployed_eval_latest.md
 
 # ── Claude Code internal state ────────────────────────────────────────────────
 .claude/
