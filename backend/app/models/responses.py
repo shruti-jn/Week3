@@ -30,7 +30,7 @@ class CodeSnippet(BaseModel):
     to find the relevant code (file + line numbers) and what the code says.
 
     Each snippet has a similarity score: 1.0 means a perfect match,
-    0.75 is our minimum threshold (anything lower is ignored).
+    0.65 is our minimum threshold (anything lower is ignored).
 
     chunk_type tells you whether this snippet was split at a natural COBOL
     paragraph boundary ("paragraph") or cut at a fixed line count ("fixed").

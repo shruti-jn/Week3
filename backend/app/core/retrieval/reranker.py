@@ -21,7 +21,7 @@ Pipeline position:
     user query → embedder → pinecone query (top_k=10) → [this module] → answer generator
 
 The reranker is the last filter before the LLM sees the context, so it must:
-  1. Remove candidates whose cosine score is below the 0.75 confidence threshold
+  1. Remove candidates whose cosine score is below the 0.65 confidence threshold
   2. Re-sort survivors by combined score (cosine + keyword)
   3. Return at most top_k results (default 5)
 """
@@ -214,7 +214,7 @@ def rerank(
     query: str,
     candidates: list[SearchResult],
     top_k: int = 5,
-    min_score: float = 0.75,
+    min_score: float = 0.65,
     keyword_weight: float = KEYWORD_WEIGHT,
 ) -> list[RankedResult]:
     """
@@ -226,7 +226,7 @@ def rerank(
 
     Steps:
       1. Filter out any candidate whose cosine score < min_score threshold.
-         Below 0.75 means "not confident enough to answer" (per PRD).
+         Below 0.65 means "not confident enough to answer" (per eval results).
       2. For each surviving candidate, compute keyword_score using the chunk's
          'content' metadata field. Defaults to 0.0 if 'content' is missing.
       3. Compute combined_score =
@@ -238,7 +238,7 @@ def rerank(
         candidates:     List of SearchResult objects from PineconeWrapper.query().
                         Typically up to top_k=10 candidates.
         top_k:          Maximum number of results to return (default: 5).
-        min_score:      Minimum cosine similarity threshold (default: 0.75).
+        min_score:      Minimum cosine similarity threshold (default: 0.65).
                         Candidates below this score are excluded before reranking.
         keyword_weight: Weight given to keyword overlap in the combined score
                         (default: 0.3). The cosine weight is 1 - keyword_weight.
@@ -264,7 +264,7 @@ def rerank(
 
     for result in candidates:
         # Step 1: Apply cosine similarity threshold.
-        # The PRD specifies: if top similarity score < 0.75 → return fallback.
+        # Filter: if cosine score < 0.65 → not confident enough to answer.
         # We enforce this per-candidate so the LLM never sees weak matches.
         if result.score < min_score:
             logger.debug(

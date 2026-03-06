@@ -214,7 +214,7 @@ def test_compute_keyword_score_range() -> None:
 
 def test_rerank_happy_path_returns_ranked_results() -> None:
     """
-    Two candidates both above the 0.75 threshold.
+    Two candidates both above the 0.65 threshold.
     Should return RankedResult objects with all fields populated.
     """
     candidates = [
@@ -302,11 +302,11 @@ def test_rerank_keyword_score_in_result() -> None:
 
 def test_rerank_filters_below_default_threshold() -> None:
     """
-    Candidates with cosine score < 0.75 must be excluded from results.
+    Candidates with cosine score < 0.65 must be excluded from results.
     """
     candidates = [
         make_result("f.cob::GOOD", score=0.80, content="COMPUTE INTEREST"),
-        make_result("f.cob::BAD", score=0.70, content="COMPUTE INTEREST"),
+        make_result("f.cob::BAD", score=0.60, content="COMPUTE INTEREST"),
     ]
     results = rerank("compute interest", candidates)
     assert len(results) == 1
@@ -315,9 +315,9 @@ def test_rerank_filters_below_default_threshold() -> None:
 
 def test_rerank_score_exactly_at_threshold_included() -> None:
     """
-    Score exactly equal to min_score (0.75) should be INCLUDED (>= threshold).
+    Score exactly equal to min_score (0.65) should be INCLUDED (>= threshold).
     """
-    candidates = [make_result("f.cob::EXACT", score=0.75, content="COMPUTE INTEREST")]
+    candidates = [make_result("f.cob::EXACT", score=0.65, content="COMPUTE INTEREST")]
     results = rerank("compute interest", candidates)
     assert len(results) == 1
     assert results[0].chunk_id == "f.cob::EXACT"
@@ -325,9 +325,9 @@ def test_rerank_score_exactly_at_threshold_included() -> None:
 
 def test_rerank_score_just_below_threshold_excluded() -> None:
     """
-    Score of 0.749 is below 0.75 threshold → must be excluded.
+    Score of 0.649 is below 0.65 threshold → must be excluded.
     """
-    candidates = [make_result("f.cob::CLOSE", score=0.749, content="COMPUTE INTEREST")]
+    candidates = [make_result("f.cob::CLOSE", score=0.649, content="COMPUTE INTEREST")]
     results = rerank("compute interest", candidates)
     assert len(results) == 0
 

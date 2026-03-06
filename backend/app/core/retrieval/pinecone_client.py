@@ -95,7 +95,7 @@ class PineconeWrapper:
             client=client, index_name=settings.pinecone_index_name
         )
 
-        results = await wrapper.query(embedding, top_k=5, min_score=0.75)
+        results = await wrapper.query(embedding, top_k=5, min_score=0.65)
     """
 
     def __init__(self, client: Any, index_name: str) -> None:  # noqa: ANN401 -- Pinecone client lacks stubs; Any is required
@@ -250,7 +250,7 @@ class PineconeWrapper:
                         More candidates = slightly better results but more cost.
             min_score:  Minimum cosine similarity to include in results (0.0-1.0).
                         Below this threshold, the code is not relevant enough.
-                        Project default: 0.75 (from config.similarity_threshold).
+                        Project default: 0.65 (from config.similarity_threshold).
 
         Returns:
             List of SearchResult objects sorted by score descending.
@@ -261,7 +261,7 @@ class PineconeWrapper:
 
         Example:
             query_vec = [0.1] * 1536  # from OpenAI embeddings API
-            results = await wrapper.query(query_vec, top_k=5, min_score=0.75)
+            results = await wrapper.query(query_vec, top_k=5, min_score=0.65)
             for r in results:
                 print(r.chunk_id, r.score)
             # loan-calc.cob::CALCULATE-INTEREST 0.92
