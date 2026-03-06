@@ -249,14 +249,14 @@ def _build_markdown_report(report: dict[str, Any]) -> str:
         f"- Latency p95 (query_time_ms): `{latency['query_time_ms_p95']:.2f}` ms",
         f"- Latency target: `< {TARGET_LATENCY_MS}` ms",
         "",
-        "| ID | Pass | Matched | Threshold | Top | Query ms | Failure Mode | Reason |",
+        "| Query | Pass | Matched | Threshold | Top | Query ms | Failure Mode | Reason |",
         "|---|---|---:|---:|---:|---:|---|---|",
     ]
     for item in report["results"]:
         matched = "-" if item["matched_score"] is None else f"{item['matched_score']:.4f}"
         query_ms = "-" if item["query_time_ms"] is None else f"{item['query_time_ms']:.2f}"
         lines.append(
-            f"| {item['id']} | {'PASS' if item['passed'] else 'FAIL'} | "
+            f"| {item['query']} | {'PASS' if item['passed'] else 'FAIL'} | "
             f"{matched} | {item['threshold']:.2f} | {item['top_score']:.4f} | "
             f"{query_ms} | {item['failure_mode']} | {item['reason']} |"
         )

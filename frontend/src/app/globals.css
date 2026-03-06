@@ -189,3 +189,26 @@ input:focus {
 .mermaid-terminal g.node {
   cursor: help;
 }
+
+/* HTML label rendering (htmlLabels: true) — foreignObject content inherits
+   the terminal font and renders the two-line enriched labels correctly.   */
+.mermaid-terminal g.label foreignObject {
+  overflow: visible !important;
+}
+
+.mermaid-terminal foreignObject > div,
+.mermaid-terminal .nodeLabel,
+.mermaid-terminal .nodeLabel p {
+  font-family: 'JetBrains Mono', 'Fira Code', monospace !important;
+  line-height: 1.4 !important;
+  text-align: center !important;
+  margin: 0 !important;
+  padding: 0 !important;
+  background: transparent !important;
+}
+
+/* Prevent detail line spans from wrapping inside the foreignObject */
+.mermaid-terminal .nodeLabel span {
+  white-space: nowrap !important;
+  display: block !important;
+}

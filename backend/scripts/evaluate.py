@@ -193,7 +193,7 @@ def _build_markdown_report(report: dict[str, Any]) -> str:
     )
     lines.append(f"- Target: `{report['target_precision_at_5']:.2f}`")
     lines.append("")
-    lines.append("| ID | Pass | Matched | Threshold | Top | Failure Mode | Reason |")
+    lines.append("| Query | Pass | Matched | Threshold | Top | Failure Mode | Reason |")
     lines.append("|---|---|---:|---:|---:|---|---|")
 
     for item in report["results"]:
@@ -202,7 +202,7 @@ def _build_markdown_report(report: dict[str, Any]) -> str:
         )
         pass_mark = "PASS" if item["passed"] else "FAIL"
         lines.append(
-            f"| {item['id']} | {pass_mark} | {matched_score} | "
+            f"| {item['query']} | {pass_mark} | {matched_score} | "
             f"{item['threshold']:.2f} | {item['top_score']:.4f} | "
             f"{item['failure_mode']} | {item['reason']} |"
         )

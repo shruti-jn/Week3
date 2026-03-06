@@ -230,7 +230,7 @@ const MERMAID_CONFIG = {
   },
   flowchart: {
     useMaxWidth: true,
-    htmlLabels: false,
+    htmlLabels: true,
     curve: 'linear' as const,
   },
 }

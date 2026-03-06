@@ -70,13 +70,16 @@ def test_precision_at_5_meets_target() -> None:
 
     # Print full per-query breakdown so failures are self-explanatory in CI logs.
     print(f"\nPrecision@5: {precision:.4f} ({passed}/{total}) — target {TARGET_PRECISION:.2f}")
-    print(f"{'ID':<8} {'Pass':<6} {'Matched':>8} {'Top':>7} {'Failure Mode':<18} Reason")
+    print(
+        f"{'Query':<48} {'Pass':<6} {'Matched':>8} {'Top':>7} "
+        f"{'Failure Mode':<18} Reason"
+    )
     print("-" * 80)
     for item in report["results"]:
         matched = "-" if item["matched_score"] is None else f"{item['matched_score']:.4f}"
         mark = "PASS" if item["passed"] else "FAIL"
         print(
-            f"{item['id']:<8} {mark:<6} {matched:>8} {item['top_score']:>7.4f} "
+            f"{item['query'][:48]:<48} {mark:<6} {matched:>8} {item['top_score']:>7.4f} "
             f"{item['failure_mode']:<18} {item['reason']}"
         )
 
@@ -90,21 +93,21 @@ def test_precision_at_5_meets_target() -> None:
     ]
 
     if no_results:
-        ids = ", ".join(r["id"] for r in no_results)
+        queries = ", ".join(r["query"] for r in no_results)
         print(
-            f"\nno_results ({len(no_results)}): {ids} "
+            f"\nno_results ({len(no_results)}): {queries} "
             "— API returned nothing; check SIMILARITY_THRESHOLD in Railway env first"
         )
     if not_retrieved:
-        ids = ", ".join(r["id"] for r in not_retrieved)
+        queries = ", ".join(r["query"] for r in not_retrieved)
         print(
-            f"not_retrieved ({len(not_retrieved)}): {ids} "
+            f"not_retrieved ({len(not_retrieved)}): {queries} "
             "— fix chunking/reranking; file is indexed but wrong chunk ranks higher"
         )
     if below_threshold:
-        ids = ", ".join(r["id"] for r in below_threshold)
+        queries = ", ".join(r["query"] for r in below_threshold)
         print(
-            f"below_threshold ({len(below_threshold)}): {ids} "
+            f"below_threshold ({len(below_threshold)}): {queries} "
             "— right chunk found; consider lowering min_score or improving query phrasing"
         )
 
