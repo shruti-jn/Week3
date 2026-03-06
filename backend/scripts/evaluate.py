@@ -37,7 +37,8 @@ if str(_BACKEND_DIR) not in sys.path:
     sys.path.insert(0, str(_BACKEND_DIR))
 
 from app.core.ingestion.embedder import embed_query
-from app.core.retrieval.pinecone_client import PineconeWrapper, SearchResult
+from app.core.retrieval.pinecone_client import PineconeWrapper
+from app.core.retrieval.reranker import RankedResult, rerank
 from scripts.eval_shared import (
     FailureMode,
     GoldenQuery,
@@ -48,6 +49,9 @@ from scripts.eval_shared import (
 TOP_K = 5
 FIXTURE_PATH = Path("tests/fixtures/golden_queries.json")
 DEFAULT_RESULTS_DIR = Path("eval_results")
+DEFAULT_SIMILARITY_THRESHOLD = 0.65
+SCORE_METRIC = "combined_score"
+SCORE_METRIC_FORMULA = "0.7*cosine + 0.3*keyword_overlap"
 
 
 @dataclass
@@ -67,7 +71,7 @@ class QueryEvalResult:
     reason: str
 
 
-def _evaluate_one(golden: GoldenQuery, results: list[SearchResult]) -> QueryEvalResult:
+def _evaluate_one(golden: GoldenQuery, ranked_results: list[RankedResult]) -> QueryEvalResult:
     """
     Score one query by checking whether the expected chunk is in the top-k results.
 
@@ -75,16 +79,16 @@ def _evaluate_one(golden: GoldenQuery, results: list[SearchResult]) -> QueryEval
     tuples that classify_result expects, then maps the FailureMode back to
     human-readable reason strings for the report.
     """
-    top = results[0] if results else None
-    top_score = float(top.score) if top else 0.0
+    top = ranked_results[0] if ranked_results else None
+    top_score = float(top.combined_score) if top else 0.0
 
     snippets = [
         (
             str(r.metadata.get("file_path", "")),
             str(r.metadata.get("paragraph_name", "")),
-            float(r.score),
+            float(r.combined_score),
         )
-        for r in results
+        for r in ranked_results
     ]
 
     passed, matched_score, failure_mode = classify_result(golden, snippets, top_score)
@@ -104,7 +108,7 @@ def _evaluate_one(golden: GoldenQuery, results: list[SearchResult]) -> QueryEval
         threshold=golden.min_score,
         matched_score=matched_score,
         top_score=top_score,
-        top_chunk_id=str(top.chunk_id) if top else None,
+        top_chunk_id=top.chunk_id if top else None,
         top_file_path=str(top.metadata.get("file_path", "")) if top else None,
         failure_mode=failure_mode.value,
         reason=reason_map[failure_mode],
@@ -127,6 +131,9 @@ async def _run_eval() -> dict[str, Any]:
     voyage_client = voyageai.Client(api_key=voyage_api_key)  # type: ignore[attr-defined]  # no stubs
     pinecone_client = Pinecone(api_key=pinecone_api_key)
     wrapper = PineconeWrapper(pinecone_client, pinecone_index_name)
+    similarity_threshold = float(
+        os.environ.get("SIMILARITY_THRESHOLD", str(DEFAULT_SIMILARITY_THRESHOLD))
+    )
 
     golden_queries = load_golden_queries(FIXTURE_PATH)
     query_results: list[QueryEvalResult] = []
@@ -136,9 +143,15 @@ async def _run_eval() -> dict[str, Any]:
         retrieved = await wrapper.query(
             query_embedding,
             top_k=TOP_K,
-            min_score=0.0,
+            min_score=similarity_threshold,
         )
-        query_results.append(_evaluate_one(golden, retrieved))
+        ranked = rerank(
+            query=golden.query,
+            candidates=retrieved,
+            top_k=TOP_K,
+            min_score=similarity_threshold,
+        )
+        query_results.append(_evaluate_one(golden, ranked))
 
     passed = sum(1 for result in query_results if result.passed)
     total = len(query_results)
@@ -148,6 +161,9 @@ async def _run_eval() -> dict[str, Any]:
         "generated_at_utc": datetime.now(UTC).isoformat(),
         "index_name": pinecone_index_name,
         "embedding_model": "voyage-code-2",
+        "score_metric": SCORE_METRIC,
+        "score_metric_formula": SCORE_METRIC_FORMULA,
+        "similarity_threshold": similarity_threshold,
         "top_k": TOP_K,
         "total_queries": total,
         "passed_queries": passed,
@@ -165,6 +181,11 @@ def _build_markdown_report(report: dict[str, Any]) -> str:
     lines.append(f"- Generated at: `{report['generated_at_utc']}`")
     lines.append(f"- Index: `{report['index_name']}`")
     lines.append(f"- Embedding model used: `{report['embedding_model']}`")
+    lines.append(
+        f"- Score metric used: `{report['score_metric']}` "
+        f"({report['score_metric_formula']})"
+    )
+    lines.append(f"- Similarity threshold: `{report['similarity_threshold']:.2f}`")
     lines.append(f"- Top-k: `{report['top_k']}`")
     lines.append(
         f"- Precision@5: `{report['precision_at_5']:.4f}` "

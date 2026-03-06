@@ -53,6 +53,8 @@ DEFAULT_RESULTS_DIR = Path("eval_results")
 TARGET_PRECISION = 0.70
 TARGET_LATENCY_MS = 3000
 JWT_ALGORITHM = "HS256"
+SCORE_METRIC = "combined_score"
+SCORE_METRIC_FORMULA = "0.7*cosine + 0.3*keyword_overlap"
 
 
 @dataclass
@@ -237,6 +239,8 @@ def _build_markdown_report(report: dict[str, Any]) -> str:
         "",
         f"- Generated at: `{report['generated_at_utc']}`",
         f"- Backend URL: `{report['backend_url']}`",
+        f"- Score metric used: `{report['score_metric']}` "
+        f"({report['score_metric_formula']})",
         f"- Top-k: `{report['top_k']}`",
         f"- Precision@5: `{report['precision_at_5']:.4f}` "
         f"({report['passed_queries']}/{report['total_queries']})",
@@ -307,6 +311,8 @@ async def _run_eval(backend_url: str, nextauth_secret: str, timeout_s: float) ->
     return {
         "generated_at_utc": datetime.now(UTC).isoformat(),
         "backend_url": backend_url,
+        "score_metric": SCORE_METRIC,
+        "score_metric_formula": SCORE_METRIC_FORMULA,
         "top_k": TOP_K,
         "total_queries": total_queries,
         "passed_queries": passed_queries,

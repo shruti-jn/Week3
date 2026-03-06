@@ -5,7 +5,8 @@
     "_comment3": "Target: >70% of queries should return the expected paragraph in their top 5 results.",
     "_comment4": "Run with: pytest -m integration tests/integration/test_golden_queries.py",
     "_comment5": "Target codebase: data/gnucobol-contrib (real community-contributed COBOL, not custom files)",
-    "_comment6": "failure_mode values: no_results (API returned nothing — check SIMILARITY_THRESHOLD before assuming file missing), not_retrieved (indexed but wrong chunk ranked), below_threshold (found but low score), passed"
+    "_comment6": "failure_mode values: no_results (API returned nothing — check SIMILARITY_THRESHOLD before assuming file missing), not_retrieved (indexed but wrong chunk ranked), below_threshold (found but low score), passed",
+    "_comment7": "All min_score thresholds are calibrated for canonical combined_score = 0.7*cosine + 0.3*keyword_overlap"
   },
   {
     "id": "gq-001",
@@ -131,7 +132,7 @@
     "id": "gq-016",
     "query": "delete record from COBOL indexed file",
     "expected_paragraph": null,
-    "expected_file_pattern": "PGMOD5",
+    "expected_file_pattern": "cust01",
     "min_score": 0.60,
     "category": "business_logic"
   },

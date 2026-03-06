@@ -60,7 +60,7 @@ class GoldenQuery:
     expected_file_pattern: str
     """Case-insensitive substring matched against the chunk's file_path metadata."""
     min_score: float
-    """Minimum retrieval score the matched chunk must achieve to count as a pass."""
+    """Minimum canonical eval score (combined_score) required for pass."""
     category: str
 
 
