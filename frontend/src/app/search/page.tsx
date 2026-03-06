@@ -29,7 +29,6 @@
  */
 
 import { useState, useRef, useEffect, useCallback, type FormEvent } from 'react'
-import { useRouter, useSearchParams } from 'next/navigation'
 import { useSession } from 'next-auth/react'
 import type { Session } from 'next-auth'
 import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter'
@@ -217,18 +216,8 @@ function SnippetCard({
           className="flex min-w-0 flex-1 items-center gap-3 text-left"
           aria-expanded={expanded}
         >
-          <span
-            className="flex-shrink-0 text-sm font-bold text-terminal-accent"
-            title={
-              snippet.chunk_type === 'paragraph' ? 'COBOL paragraph chunk' : 'Fixed-size chunk'
-            }
-          >
-            ●
-          </span>
-          <span
-            className="truncate text-sm font-semibold tracking-wide text-terminal-text"
-            title={snippet.paragraph_name || displayName}
-          >
+          <span className="flex-shrink-0 text-sm font-bold text-terminal-accent">●</span>
+          <span className="truncate text-sm font-semibold tracking-wide text-terminal-text">
             {displayName}
           </span>
           {/* chunk_type badge */}
@@ -246,11 +235,8 @@ function SnippetCard({
           >
             {snippet.chunk_type === 'paragraph' ? 'para' : 'fixed'}
           </span>
-          <span
-            className="hidden truncate text-xs text-terminal-muted sm:block"
-            title={`${snippet.file_path} · lines ${snippet.start_line}–${snippet.end_line}`}
-          >
-            {fileName}
+          <span className="hidden truncate text-xs text-terminal-muted sm:block">
+            {snippet.file_path}
             <span className="text-terminal-dim">
               {' '}
               · lines {snippet.start_line}–{snippet.end_line}
@@ -260,10 +246,7 @@ function SnippetCard({
 
         {/* Right: score + view file + expand */}
         <div className="ml-3 flex flex-shrink-0 items-center gap-3">
-          <span
-            className="font-mono text-xs"
-            title={`Cosine similarity score: ${snippet.score.toFixed(4)} (1.0 = perfect match)`}
-          >
+          <span className="font-mono text-xs">
             <span className="text-terminal-muted">score: </span>
             <span className="text-terminal-accent">{snippet.score.toFixed(3)}</span>
           </span>
@@ -282,7 +265,6 @@ function SnippetCard({
             onClick={() => setExpanded((v) => !v)}
             className="text-xs text-terminal-muted"
             aria-label={expanded ? 'Collapse' : 'Expand'}
-            title={expanded ? 'Collapse code' : 'Expand code'}
           >
             {expanded ? '▲' : '▼'}
           </button>
@@ -832,8 +814,6 @@ const EXAMPLE_QUERIES = [
 export default function SearchPage(): React.JSX.Element {
   const { data: rawSession } = useSession()
   const session = rawSession as LegacySession | null
-  const router = useRouter()
-  const searchParams = useSearchParams()
 
   const [query, setQuery] = useState('')
   const [snippets, setSnippets] = useState<CodeSnippet[]>([])
@@ -865,8 +845,6 @@ export default function SearchPage(): React.JSX.Element {
   // Keep a ref to the latest answer so the closure in streamQuery always
   // appends to the most recent value (avoids stale closure issue).
   const answerRef = useRef('')
-  // Prevent the URL-param auto-submit from firing more than once per page load.
-  const hasAutoSubmittedRef = useRef(false)
 
   // Load persisted query log from localStorage on mount
   useEffect(() => {
@@ -887,18 +865,6 @@ export default function SearchPage(): React.JSX.Element {
         // Silently ignore — the query will surface a 401 if auth fails
       })
   }, [session])
-
-  // Auto-submit from ?q= URL param — waits for backendToken; ref gate prevents double-fires.
-  // eslint-disable-next-line react-hooks/exhaustive-deps -- handleSubmit omitted intentionally: changes every render; ref gate prevents double-fires
-  useEffect(() => {
-    if (hasAutoSubmittedRef.current) return
-    const urlQuery = searchParams.get('q')
-    if (!urlQuery || !backendToken) return
-    hasAutoSubmittedRef.current = true
-    setQuery(urlQuery)
-    void handleSubmit(urlQuery)
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- handleSubmit is not useCallback-wrapped; adding it would cause an infinite loop
-  }, [backendToken, searchParams])
 
   // Wake the Railway dyno early — free-tier dynos sleep after inactivity.
   // Firing on page load gives the backend ~2 seconds to warm up before the
@@ -922,8 +888,6 @@ export default function SearchPage(): React.JSX.Element {
     setMetrics(null)
     setSubmittedQuery(finalQuery)
     answerRef.current = ''
-    // Reflect the query in the URL so it can be bookmarked / shared.
-    router.replace(`/search?q=${encodeURIComponent(finalQuery)}`, { scroll: false })
 
     try {
       await streamQuery(finalQuery, token, {
@@ -986,8 +950,6 @@ export default function SearchPage(): React.JSX.Element {
     setMetrics(null)
     setSubmittedQuery('')
     answerRef.current = ''
-    hasAutoSubmittedRef.current = false
-    router.replace('/search', { scroll: false })
   }
 
   /**
